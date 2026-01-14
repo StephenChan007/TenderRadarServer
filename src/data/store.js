@@ -90,6 +90,63 @@ const sites = [
       dateSelector: '.ewb-list-node-time'
     },
     status: 1
+  },
+  {
+    id: 3,
+    site_name: '中铝招标信息',
+    site_url: 'https://zb.chinalco.com.cn',
+    list_page_url: 'https://zb.chinalco.com.cn/zbxx/001003/bid_goods.html',
+    crawler_type: 'static',
+    selector_config: null,
+    status: 1
+  },
+  {
+    id: 4,
+    site_name: '华能电子采购平台',
+    site_url: 'https://ec.chng.com.cn',
+    list_page_url:
+      'https://ec.chng.com.cn/channel/home/?SlJfApAfmEBp=1768269010950#/purchase',
+    crawler_type: 'static',
+    selector_config: null,
+    status: 1
+  },
+  {
+    id: 5,
+    site_name: '成达通平台',
+    site_url: 'https://tang.cdt-ec.com',
+    list_page_url: 'https://tang.cdt-ec.com/notice/webpage/jsp/more.jsp',
+    crawler_type: 'static',
+    selector_config: null,
+    status: 1
+  },
+  {
+    id: 6,
+    site_name: '国家能源招标网',
+    site_url: 'https://www.chnenergybidding.com.cn',
+    list_page_url:
+      'https://www.chnenergybidding.com.cn/bidweb/001/001002/001002003/moreinfo.html',
+    crawler_type: 'static',
+    selector_config: null,
+    status: 1
+  },
+  {
+    id: 7,
+    site_name: '华电招采平台',
+    site_url: 'https://www.chdtp.com.cn',
+    list_page_url: 'https://www.chdtp.com.cn/pages/wzglS/cgxx/caigou.jsp',
+    crawler_type: 'static',
+    selector_config: null,
+    status: 1
+  },
+  {
+    id: 8,
+    site_name: '国家电网电子商务平台',
+    site_url: 'https://ecp.sgcc.com.cn',
+    list_page_url:
+      'https://ecp.sgcc.com.cn/ecp2.0//portal/#/list/list-spe/2018032600289606_1_2018032700291334',
+    crawler_type: 'static',
+    selector_config: null,
+    status: 1
   }
 ]
 
@@ -222,6 +279,16 @@ async function getNoticeById(id) {
   return withIsRead(notices.find(item => Number(item.id) === Number(id)))
 }
 
+function normalizeSelectorConfig(cfg) {
+  if (!cfg) return null
+  if (typeof cfg === 'object') return cfg
+  try {
+    return JSON.parse(cfg)
+  } catch (_e) {
+    return null
+  }
+}
+
 async function getKeywords() {
   if (pool) {
     try {
@@ -319,6 +386,59 @@ async function updateSiteStatus(id, status) {
   if (!site) return null
   site.status = status ? 1 : 0
   return site
+}
+
+async function addSite({
+  site_name,
+  site_url,
+  list_page_url,
+  crawler_type = 'static',
+  selector_config,
+  status = 1
+}) {
+  const parsedCfg = normalizeSelectorConfig(selector_config)
+  if (pool) {
+    try {
+      const [result] = await pool.query(
+        `INSERT INTO monitor_sites (site_name, site_url, list_page_url, crawler_type, selector_config, status)
+         VALUES (?, ?, ?, ?, ?, ?)`,
+        [
+          site_name || '',
+          site_url || '',
+          list_page_url || '',
+          crawler_type || 'static',
+          parsedCfg ? JSON.stringify(parsedCfg) : null,
+          status ? 1 : 0
+        ]
+      )
+      const [rows] = await pool.query(
+        `SELECT id, site_name, site_url, list_page_url, crawler_type, selector_config, status
+         FROM monitor_sites
+         WHERE id = ? LIMIT 1`,
+        [result.insertId]
+      )
+      const site = rows?.[0] || null
+      if (!site) return null
+      return {
+        ...site,
+        selector_config: parseSelectorConfig(site.selector_config)
+      }
+    } catch (e) {
+      handleDbError('addSite', e)
+    }
+  }
+  const id = nextId(sites)
+  const item = {
+    id,
+    site_name,
+    site_url,
+    list_page_url,
+    crawler_type: crawler_type || 'static',
+    selector_config: parsedCfg,
+    status: status ? 1 : 0
+  }
+  sites.push(item)
+  return item
 }
 
 async function getSubscriptionStatus() {
@@ -447,6 +567,7 @@ module.exports = {
   removeKeyword,
   getSites,
   updateSiteStatus,
+  addSite,
   getSubscriptionStatus,
   updateSubscriptionStatus,
   getUserProfile,
