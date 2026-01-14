@@ -8,6 +8,9 @@ const REDIS_URL = process.env.REDIS_URL
 let pool = null
 let redis = null
 
+console.log(`[Config] DB_URL=${DB_URL || 'not set'}`)
+console.log(`[Config] REDIS_URL=${REDIS_URL || 'not set'}`)
+
 if (DB_URL) {
   try {
     pool = mysql.createPool(DB_URL)
@@ -105,6 +108,15 @@ function nextId(list) {
   return Math.max(...list.map(item => Number(item.id) || 0)) + 1
 }
 
+function withIsRead(notice) {
+  if (!notice) return notice
+  const isReadValue = notice.is_read
+  return {
+    ...notice,
+    is_read: typeof isReadValue === 'boolean' ? isReadValue : !!isReadValue
+  }
+}
+
 function paginate(list, page = 1, pageSize = 20) {
   const p = Math.max(Number(page) || 1, 1)
   const size = Math.max(Number(pageSize) || 20, 1)
@@ -145,7 +157,7 @@ async function getNotices({ page = 1, pageSize = 20, keyword } = {}) {
         params
       )
       return {
-        data: rows,
+        data: rows.map(withIsRead),
         page: p,
         pageSize: size,
         total: countRows?.[0]?.total || 0
@@ -165,7 +177,11 @@ async function getNotices({ page = 1, pageSize = 20, keyword } = {}) {
         (item.content && item.content.includes(kw))
     )
   }
-  return paginate(list, page, pageSize)
+  const result = paginate(list, page, pageSize)
+  return {
+    ...result,
+    data: result.data.map(withIsRead)
+  }
 }
 
 async function hasNotice(title, sourceUrl) {
@@ -198,12 +214,12 @@ async function getNoticeById(id) {
          LIMIT 1`,
         [id]
       )
-      return rows?.[0] || null
+      return withIsRead(rows?.[0] || null)
     } catch (e) {
       handleDbError('getNoticeById', e)
     }
   }
-  return notices.find(item => Number(item.id) === Number(id))
+  return withIsRead(notices.find(item => Number(item.id) === Number(id)))
 }
 
 async function getKeywords() {
