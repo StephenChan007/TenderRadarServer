@@ -8,6 +8,7 @@ const HN_TOKEN = process.env.HUANENG_TOKEN || process.env.HN_TOKEN || ''
 const HN_JSON_PATH =
   process.env.HUANENG_JSON_PATH || process.env.HN_JSON_PATH || '/tmp/huaneng.json'
 const CHINALCO_SITE_GUID = '7eb5f7f1-9041-43ad-8e13-8fcb82ea831a'
+const TANG_COOKIE = process.env.TANG_COOKIE || ''
 
 function loadHuanengCreds() {
   let cookie = HN_COOKIE
@@ -187,6 +188,68 @@ async function crawlChinalcoApi(site) {
   }))
 }
 
+function buildTangDetailUrl(row) {
+  if (!row?.id) return ''
+  const base = 'https://tang.cdt-ec.com'
+  const id = row.id
+  const mt = row.message_type || row.messageType
+  const title = row.message_title || row.messageTitle || ''
+  if (mt === '4' || mt === '5' || mt === '23' || mt === '24' || mt === '26') {
+    return `${base}/notice/moreController/xjdhtml?id=${id}`
+  }
+  if (mt === '31') {
+    return `${base}/home/moreall.html?id=${id}&message_type=${mt}&message_title=${encodeURIComponent(
+      title
+    )}`
+  }
+  return `${base}/notice/moreController/moreall?id=${id}`
+}
+
+async function crawlTangApi(site) {
+  if (!TANG_COOKIE) {
+    console.warn('Tang crawler skipped: set TANG_COOKIE')
+    return []
+  }
+  const url = 'https://tang.cdt-ec.com/notice/moreController/getList'
+  const body = new URLSearchParams({
+    pageIndex: '0',
+    pageSize: '20',
+    globleType: '0'
+  }).toString()
+  const res = await axios.post(url, body, {
+    timeout: 20000,
+    headers: {
+      Cookie: TANG_COOKIE,
+      'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
+      'User-Agent':
+        'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+      Referer: site.list_page_url || site.site_url || 'https://tang.cdt-ec.com',
+      Origin: 'https://tang.cdt-ec.com',
+      'X-Requested-With': 'XMLHttpRequest',
+      Accept: 'application/json, text/javascript, */*; q=0.01'
+    }
+  })
+  const data = res.data
+  const list =
+    Array.isArray(data?.data?.data) || Array.isArray(data?.data?.list)
+      ? data.data.data || data.data.list
+      : Array.isArray(data?.data)
+        ? data.data
+        : Array.isArray(data?.list)
+          ? data.list
+          : []
+  return list
+    .map(row => ({
+      title: row.message_title || row.title || '',
+      source_url: buildTangDetailUrl(row),
+      publishDate:
+        toISODate(row.deadline || row.releasetime || row.publish_date) || null,
+      site_id: site.id,
+      site_name: site.site_name
+    }))
+    .filter(item => item.title && item.source_url)
+}
+
 async function crawlHuanengApi(site) {
   const { cookie, token } = loadHuanengCreds()
   if (!cookie || !token) {
@@ -278,6 +341,8 @@ async function crawlSite(site) {
       notices = await crawlHuanengApi(site)
     } else if (site.crawler_type === 'chinalco_api') {
       notices = await crawlChinalcoApi(site)
+    } else if (site.crawler_type === 'tang_api') {
+      notices = await crawlTangApi(site)
     } else {
       notices = await crawlStaticSite(site)
     }
