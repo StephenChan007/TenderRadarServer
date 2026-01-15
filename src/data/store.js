@@ -64,34 +64,6 @@ const keywords = [
 
 const sites = [
   {
-    id: 1,
-    site_name: '中国政府采购网',
-    site_url: 'http://www.ccgp.gov.cn',
-    list_page_url: 'http://www.ccgp.gov.cn/cggg/dfgg/',
-    crawler_type: 'static',
-    selector_config: {
-      listSelector: '.vT_detail_list > ul > li, .vT_detail_llist > ul > li',
-      titleSelector: 'a',
-      linkSelector: 'a',
-      dateSelector: 'span'
-    },
-    status: 1
-  },
-  {
-    id: 2,
-    site_name: '全国公共资源交易平台',
-    site_url: 'http://deal.ggzy.gov.cn',
-    list_page_url: 'http://deal.ggzy.gov.cn/ds/deal/dealList.html',
-    crawler_type: 'static',
-    selector_config: {
-      listSelector: '.ewb-list-node',
-      titleSelector: '.ewb-list-node-title a',
-      linkSelector: '.ewb-list-node-title a',
-      dateSelector: '.ewb-list-node-time'
-    },
-    status: 1
-  },
-  {
     id: 3,
     site_name: '中铝招标信息',
     site_url: 'https://zb.chinalco.com.cn',
