@@ -56,6 +56,15 @@ async function main() {
   await page.waitForTimeout(3000)
   if (!token) {
     await page.waitForTimeout(2000)
+    try {
+      const html = await page.content()
+      const m1 = html.match(/kbfJdf1e=([\w.\-]+)/)
+      const m2 = html.match(/"kbfJdf1e"\s*:\s*"([^"]+)"/)
+      token = token || (m1 ? m1[1] : null) || (m2 ? m2[1] : null)
+      if (token) tokenRequests.push('page-content-regex')
+    } catch (_e) {
+      // ignore
+    }
   }
 
   const cookies = await context.cookies('https://ec.chng.com.cn')
