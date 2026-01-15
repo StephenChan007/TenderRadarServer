@@ -41,7 +41,8 @@ async function main() {
     if (url.includes('queryAnnouncementByTitle')) {
       try {
         const parsed = new URL(url)
-        token = token || parsed.searchParams.get('kbfJdf1e')
+        const t = parsed.searchParams.get('kbfJdf1e')
+        if (t) token = t
         tokenRequests.push(url)
       } catch (_e) {
         return
@@ -56,9 +57,10 @@ async function main() {
   await page.waitForTimeout(2000)
   if (!token) {
     try {
-      await page.evaluate(async () => {
+      const evalRes = await page.evaluate(async () => {
+        let found = null
         try {
-          await fetch(
+          const res = await fetch(
             '/scm-uiaoauth-web/s/business/uiaouth/queryAnnouncementByTitle?kbfJdf1e=',
             {
               method: 'POST',
@@ -66,10 +68,29 @@ async function main() {
               body: JSON.stringify({ title: '' })
             }
           )
+          const url = res?.url || ''
+          const m = url.match(/kbfJdf1e=([^&]+)/)
+          if (m) found = m[1]
         } catch (e) {
           console.error(e)
         }
+        if (!found) {
+          const scripts = Array.from(document.scripts || [])
+          for (const s of scripts) {
+            const txt = s.textContent || ''
+            const m = txt.match(/kbfJdf1e["']?\s*[:=]\s*["']([^"']+)["']/)
+            if (m) {
+              found = m[1]
+              break
+            }
+          }
+        }
+        return found
       })
+      if (evalRes) {
+        token = evalRes
+        tokenRequests.push('page-eval')
+      }
     } catch (_e) {
       // ignore
     }
