@@ -86,7 +86,7 @@ const sites = [
     id: 3,
     site_name: '成达通平台',
     site_url: 'https://tang.cdt-ec.com',
-    list_page_url: 'https://tang.cdt-ec.com/notice/webpage/jsp/more.jsp',
+    list_page_url: 'https://tang.cdt-ec.com/notice/moreController/toMore?globleType=0',
     crawler_type: 'static',
     selector_config: null,
     status: 1
