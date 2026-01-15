@@ -1,6 +1,28 @@
 const axios = require('axios')
 const cheerio = require('cheerio')
+const fs = require('fs')
 const { addNotice, hasNotice, getKeywords, getSites } = require('../data/store')
+
+const HN_COOKIE = process.env.HUANENG_COOKIE || process.env.HN_COOKIE || ''
+const HN_TOKEN = process.env.HUANENG_TOKEN || process.env.HN_TOKEN || ''
+const HN_JSON_PATH =
+  process.env.HUANENG_JSON_PATH || process.env.HN_JSON_PATH || '/tmp/huaneng.json'
+
+function loadHuanengCreds() {
+  let cookie = HN_COOKIE
+  let token = HN_TOKEN
+  if ((!cookie || !token) && HN_JSON_PATH) {
+    try {
+      const raw = fs.readFileSync(HN_JSON_PATH, 'utf8')
+      const parsed = JSON.parse(raw)
+      if (!cookie && parsed?.cookie) cookie = parsed.cookie
+      if (!token && parsed?.token) token = parsed.token
+    } catch (_e) {
+      // ignore
+    }
+  }
+  return { cookie, token }
+}
 
 function normalizeUrl(url, base) {
   if (!url) return ''
@@ -130,13 +152,78 @@ async function crawlStaticSite(site) {
   return items
 }
 
+async function crawlHuanengApi(site) {
+  const { cookie, token } = loadHuanengCreds()
+  if (!cookie || !token) {
+    console.warn(
+      'Huaneng crawler skipped: set HUANENG_COOKIE/HUANENG_TOKEN or HUANENG_JSON_PATH'
+    )
+    return []
+  }
+  const url = `https://ec.chng.com.cn/scm-uiaoauth-web/s/business/uiaouth/queryAnnouncementByTitle?kbfJdf1e=${encodeURIComponent(
+    token
+  )}`
+  console.log('[Huaneng] Fetching list with token prefix:', token.slice(0, 6))
+  const res = await axios.post(
+    url,
+    { title: '' },
+    {
+      timeout: 20000,
+      headers: {
+        Cookie: cookie,
+        'User-Agent':
+          'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+        Referer: 'https://ec.chng.com.cn/channel/home/',
+        'Content-Type': 'application/json',
+        Accept: 'application/json, text/plain, */*',
+        'Accept-Language': 'zh-CN,zh;q=0.9'
+      }
+    }
+  )
+  const data = res.data
+  const rows = Array.isArray(data)
+    ? data
+    : Array.isArray(data?.data)
+      ? data.data
+      : Array.isArray(data?.rows)
+        ? data.rows
+        : Array.isArray(data?.body?.data)
+          ? data.body.data
+          : []
+  console.log('[Huaneng] API rows:', rows.length)
+  const items = []
+  for (const row of rows) {
+    const title = row.title || row.noticeTitle || row.announcementTitle
+    const link =
+      row.url || row.noticeUrl || row.detailUrl || row.href || row.link
+    const date =
+      row.publishDate ||
+      row.releaseDate ||
+      row.date ||
+      row.release_time ||
+      row.publish_time
+    if (!title || !link) continue
+    items.push({
+      title,
+      source_url: normalizeUrl(
+        link,
+        site.site_url || 'https://ec.chng.com.cn'
+      ),
+      publishDate: toISODate(date),
+      site_id: site.id,
+      site_name: site.site_name
+    })
+  }
+  return items
+}
+
 async function processNotice(raw, site) {
   if (!raw?.title || !raw?.source_url) return
   if (await hasNotice(raw.title, raw.source_url)) {
     return
   }
   const content = await fetchDetailContent(raw.source_url)
-    const matched = await matchKeywords(raw.title, content)
+  const matched = await matchKeywords(raw.title, content)
   if (!matched.length) return
   await addNotice({
     title: raw.title,
@@ -151,7 +238,12 @@ async function processNotice(raw, site) {
 async function crawlSite(site) {
   if (!site || site.status === 0) return
   try {
-    const notices = await crawlStaticSite(site)
+    let notices = []
+    if (site.crawler_type === 'huaneng_api') {
+      notices = await crawlHuanengApi(site)
+    } else {
+      notices = await crawlStaticSite(site)
+    }
     for (const n of notices) {
       await processNotice(n, site)
     }

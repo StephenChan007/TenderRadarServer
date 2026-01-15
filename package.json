@@ -5,7 +5,9 @@
   "main": "index.js",
   "scripts": {
     "start": "node index.js",
-    "dev": "nodemon index.js"
+    "dev": "nodemon index.js",
+    "refresh:huaneng": "node scripts/refresh-huaneng.js",
+    "start:auto": "node scripts/refresh-huaneng.js && node index.js"
   },
   "engines": {
     "node": ">=20"
@@ -22,6 +24,7 @@
     "node-cron": "^3.0.3"
   },
   "devDependencies": {
-    "nodemon": "^3.1.0"
+    "nodemon": "^3.1.0",
+    "playwright-chromium": "^1.41.2"
   }
 }

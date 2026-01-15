@@ -19,6 +19,7 @@
 - Prefer async/await; surface errors with `next(err)` and centralized handlers.
 - Use camelCase for functions/variables; keep route files lowercase with hyphens.
 - Centralize configuration and environment reads in shared helpers instead of per-route duplication.
+- All API responses, error messages, logs, and documentation comments must be written in Chinese. Please answer in Chinese by default.
 
 ## Testing Guidelines
 - No automated suite yet; add integration tests under `tests/` using Jest + supertest when expanding APIs.

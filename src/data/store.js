@@ -97,7 +97,12 @@ const sites = [
     site_url: 'https://zb.chinalco.com.cn',
     list_page_url: 'https://zb.chinalco.com.cn/zbxx/001003/bid_goods.html',
     crawler_type: 'static',
-    selector_config: null,
+    selector_config: {
+      listSelector: '#list .list-item',
+      titleSelector: '.item-title .text',
+      linkSelector: 'a',
+      dateSelector: '.item-release .text'
+    },
     status: 1
   },
   {
@@ -106,7 +111,7 @@ const sites = [
     site_url: 'https://ec.chng.com.cn',
     list_page_url:
       'https://ec.chng.com.cn/channel/home/?SlJfApAfmEBp=1768269010950#/purchase',
-    crawler_type: 'static',
+    crawler_type: 'huaneng_api',
     selector_config: null,
     status: 1
   },
@@ -126,7 +131,12 @@ const sites = [
     list_page_url:
       'https://www.chnenergybidding.com.cn/bidweb/001/001002/001002003/moreinfo.html',
     crawler_type: 'static',
-    selector_config: null,
+    selector_config: {
+      listSelector: '.right-items .right-item',
+      titleSelector: '.r-block a',
+      linkSelector: '.r-block a',
+      dateSelector: 'span.r'
+    },
     status: 1
   },
   {
