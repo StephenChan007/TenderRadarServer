@@ -9,6 +9,8 @@ const HN_JSON_PATH =
   process.env.HUANENG_JSON_PATH || process.env.HN_JSON_PATH || '/tmp/huaneng.json'
 const CHINALCO_SITE_GUID = '7eb5f7f1-9041-43ad-8e13-8fcb82ea831a'
 const TANG_COOKIE = process.env.TANG_COOKIE || ''
+const TANG_JSON_PATH =
+  process.env.TANG_JSON_PATH || process.env.TANG_COOKIE_PATH || '/tmp/tang.json'
 
 function loadHuanengCreds() {
   let cookie = HN_COOKIE
@@ -24,6 +26,20 @@ function loadHuanengCreds() {
     }
   }
   return { cookie, token }
+}
+
+function loadTangCookie() {
+  let cookie = TANG_COOKIE
+  if (!cookie && TANG_JSON_PATH) {
+    try {
+      const raw = fs.readFileSync(TANG_JSON_PATH, 'utf8')
+      const parsed = JSON.parse(raw)
+      if (parsed?.cookie) cookie = parsed.cookie
+    } catch (_e) {
+      // ignore
+    }
+  }
+  return cookie
 }
 
 function normalizeUrl(url, base) {
@@ -206,8 +222,9 @@ function buildTangDetailUrl(row) {
 }
 
 async function crawlTangApi(site) {
-  if (!TANG_COOKIE) {
-    console.warn('Tang crawler skipped: set TANG_COOKIE')
+  const cookie = loadTangCookie()
+  if (!cookie) {
+    console.warn('Tang crawler skipped: set TANG_COOKIE or TANG_JSON_PATH')
     return []
   }
   const url = 'https://tang.cdt-ec.com/notice/moreController/getList'
@@ -219,7 +236,7 @@ async function crawlTangApi(site) {
   const res = await axios.post(url, body, {
     timeout: 20000,
     headers: {
-      Cookie: TANG_COOKIE,
+      Cookie: cookie,
       'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
       'User-Agent':
         'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
