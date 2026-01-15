@@ -68,13 +68,8 @@ const sites = [
     site_name: '中铝招标信息',
     site_url: 'https://zb.chinalco.com.cn',
     list_page_url: 'https://zb.chinalco.com.cn/zbxx/001003/bid_goods.html',
-    crawler_type: 'static',
-    selector_config: {
-      listSelector: '#list .list-item',
-      titleSelector: '.item-title .text',
-      linkSelector: 'a',
-      dateSelector: '.item-release .text'
-    },
+    crawler_type: 'chinalco_api',
+    selector_config: null,
     status: 1
   },
   {

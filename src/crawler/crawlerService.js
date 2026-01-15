@@ -7,6 +7,7 @@ const HN_COOKIE = process.env.HUANENG_COOKIE || process.env.HN_COOKIE || ''
 const HN_TOKEN = process.env.HUANENG_TOKEN || process.env.HN_TOKEN || ''
 const HN_JSON_PATH =
   process.env.HUANENG_JSON_PATH || process.env.HN_JSON_PATH || '/tmp/huaneng.json'
+const CHINALCO_SITE_GUID = '7eb5f7f1-9041-43ad-8e13-8fcb82ea831a'
 
 function loadHuanengCreds() {
   let cookie = HN_COOKIE
@@ -152,6 +153,40 @@ async function crawlStaticSite(site) {
   return items
 }
 
+async function crawlChinalcoApi(site) {
+  const url = 'https://zb.chinalco.com.cn/EWB-FRONT/rest/secaction/getSecInfoListYzmstr'
+  const body = new URLSearchParams({
+    siteGuid: CHINALCO_SITE_GUID,
+    categoryNum: '001003',
+    content: '',
+    pageIndex: '0',
+    pageSize: '10',
+    startdate: '',
+    enddate: ''
+  }).toString()
+  const res = await axios.post(url, body, {
+    timeout: 20000,
+    headers: {
+      'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
+      'User-Agent':
+        'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+      Referer: 'https://zb.chinalco.com.cn/zbxx/001003/bid_goods.html',
+      Origin: 'https://zb.chinalco.com.cn',
+      'X-Requested-With': 'XMLHttpRequest',
+      Accept: 'application/json, text/javascript, */*; q=0.01'
+    }
+  })
+  const data = res.data
+  const items = Array.isArray(data?.data?.rows) ? data.data.rows : []
+  return items.map(row => ({
+    title: row.title || row.infoname || '',
+    source_url: row.url || row.infourl || '',
+    publishDate: toISODate(row.infodate || row.publish_date || row.releasetime),
+    site_id: site.id,
+    site_name: site.site_name
+  }))
+}
+
 async function crawlHuanengApi(site) {
   const { cookie, token } = loadHuanengCreds()
   if (!cookie || !token) {
@@ -241,6 +276,8 @@ async function crawlSite(site) {
     let notices = []
     if (site.crawler_type === 'huaneng_api') {
       notices = await crawlHuanengApi(site)
+    } else if (site.crawler_type === 'chinalco_api') {
+      notices = await crawlChinalcoApi(site)
     } else {
       notices = await crawlStaticSite(site)
     }
