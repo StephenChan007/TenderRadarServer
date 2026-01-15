@@ -304,59 +304,62 @@ async function crawlHuanengApi(site) {
     )
     return []
   }
-  const url = `https://ec.chng.com.cn/scm-uiaoauth-web/s/business/uiaouth/queryAnnouncementByTitle?kbfJdf1e=${encodeURIComponent(
-    token
-  )}`
-  console.log('[Huaneng] Fetching list with token prefix:', token.slice(0, 6))
-  const res = await axios.post(
-    url,
-    { type: '103' },
-    {
-      timeout: 20000,
-      headers: {
-        Cookie: cookie,
-        'User-Agent':
-          'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-        Referer: 'https://ec.chng.com.cn/channel/home/',
-        'Content-Type': 'application/json',
-        Accept: 'application/json, text/plain, */*',
-        'Accept-Language': 'zh-CN,zh;q=0.9'
-      }
-    }
-  )
-  const data = res.data
-  const rows = Array.isArray(data)
-    ? data
-    : Array.isArray(data?.data)
-      ? data.data
-      : Array.isArray(data?.rows)
-        ? data.rows
-        : Array.isArray(data?.body?.data)
-          ? data.body.data
-          : []
-  console.log('[Huaneng] API rows:', rows.length)
+  const types = ['103', '107']
   const items = []
-  for (const row of rows) {
-    const title = row.title || row.noticeTitle || row.announcementTitle
-    const link =
-      row.url || row.noticeUrl || row.detailUrl || row.href || row.link
-    const date =
-      row.publishDate ||
-      row.releaseDate ||
-      row.date ||
-      row.release_time ||
-      row.publish_time
-    if (!title || !link) continue
-    items.push({
-      title,
-      source_url: normalizeUrl(
-        link,
-        site.site_url || 'https://ec.chng.com.cn'
-      ),
-      publishDate: toISODate(date),
-      site_id: site.id,
-      site_name: site.site_name
-    })
+  for (const t of types) {
+    const url = `https://ec.chng.com.cn/scm-uiaoauth-web/s/business/uiaouth/queryAnnouncementByTitle?kbfJdf1e=${encodeURIComponent(
+      token
+    )}`
+    console.log('[Huaneng] Fetching type', t, 'token prefix:', token.slice(0, 6))
+    const res = await axios.post(
+      url,
+      { type: t },
+      {
+        timeout: 20000,
+        headers: {
+          Cookie: cookie,
+          'User-Agent':
+            'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+          Referer: 'https://ec.chng.com.cn/channel/home/',
+          'Content-Type': 'application/json',
+          Accept: 'application/json, text/plain, */*',
+          'Accept-Language': 'zh-CN,zh;q=0.9'
+        }
+      }
+    )
+    const data = res.data
+    const rows = Array.isArray(data)
+      ? data
+      : Array.isArray(data?.data)
+        ? data.data
+        : Array.isArray(data?.rows)
+          ? data.rows
+          : Array.isArray(data?.body?.data)
+            ? data.body.data
+            : []
+    console.log('[Huaneng] type', t, 'rows:', rows.length)
+    for (const row of rows) {
+      const title = row.title || row.noticeTitle || row.announcementTitle
+      const link =
+        row.url || row.noticeUrl || row.detailUrl || row.href || row.link
+      const date =
+        row.publishDate ||
+        row.releaseDate ||
+        row.date ||
+        row.release_time ||
+        row.publish_time
+      if (!title || !link) continue
+      items.push({
+        title,
+        source_url: normalizeUrl(
+          link,
+          site.site_url || 'https://ec.chng.com.cn'
+        ),
+        publishDate: toISODate(date),
+        site_id: site.id,
+        site_name: site.site_name
+      })
+    }
   }
   return items
 }
