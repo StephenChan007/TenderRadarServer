@@ -64,7 +64,7 @@ const keywords = [
 
 const sites = [
   {
-    id: 3,
+    id: 1,
     site_name: '中铝招标信息',
     site_url: 'https://zb.chinalco.com.cn',
     list_page_url: 'https://zb.chinalco.com.cn/zbxx/001003/bid_goods.html',
@@ -78,7 +78,7 @@ const sites = [
     status: 1
   },
   {
-    id: 4,
+    id: 2,
     site_name: '华能电子采购平台',
     site_url: 'https://ec.chng.com.cn',
     list_page_url:
@@ -88,7 +88,7 @@ const sites = [
     status: 1
   },
   {
-    id: 5,
+    id: 3,
     site_name: '成达通平台',
     site_url: 'https://tang.cdt-ec.com',
     list_page_url: 'https://tang.cdt-ec.com/notice/webpage/jsp/more.jsp',
@@ -97,7 +97,7 @@ const sites = [
     status: 1
   },
   {
-    id: 6,
+    id: 4,
     site_name: '国家能源招标网',
     site_url: 'https://www.chnenergybidding.com.cn',
     list_page_url:
@@ -112,7 +112,7 @@ const sites = [
     status: 1
   },
   {
-    id: 7,
+    id: 5,
     site_name: '华电招采平台',
     site_url: 'https://www.chdtp.com.cn',
     list_page_url: 'https://www.chdtp.com.cn/pages/wzglS/cgxx/caigou.jsp',
@@ -121,7 +121,7 @@ const sites = [
     status: 1
   },
   {
-    id: 8,
+    id: 6,
     site_name: '国家电网电子商务平台',
     site_url: 'https://ecp.sgcc.com.cn',
     list_page_url:
