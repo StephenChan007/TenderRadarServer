@@ -15,6 +15,11 @@ async function main() {
   ].filter(Boolean)
   const executablePath = candidates.find(p => fs.existsSync(p))
 
+  if (!executablePath) {
+    console.warn('[Huaneng] chromium executable not found, skip refresh')
+    return
+  }
+
   const browser = await chromium.launch({
     headless: true,
     executablePath,
@@ -81,12 +86,10 @@ async function main() {
     console.log(`HUANENG_COOKIE="${cookieStr}"`)
     console.log(`HUANENG_TOKEN="${token}"`)
   } else {
-    console.error('Token not captured, try rerunning or interacting manually.')
-    process.exitCode = 1
+    console.error('Token not captured, will proceed without updating env.')
   }
 }
 
 main().catch(err => {
   console.error('Refresh failed', err.message || err)
-  process.exitCode = 1
 })
