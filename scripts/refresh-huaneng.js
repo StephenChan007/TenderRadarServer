@@ -51,11 +51,11 @@ async function main() {
 
   await page.goto('https://ec.chng.com.cn/channel/home/', {
     waitUntil: 'networkidle',
-    timeout: 60000
+    timeout: 20000
   })
-  await page.waitForTimeout(8000)
+  await page.waitForTimeout(3000)
   if (!token) {
-    await page.waitForTimeout(5000)
+    await page.waitForTimeout(2000)
   }
 
   const cookies = await context.cookies('https://ec.chng.com.cn')
