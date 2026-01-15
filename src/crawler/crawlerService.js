@@ -171,37 +171,52 @@ async function crawlStaticSite(site) {
 }
 
 async function crawlChinalcoApi(site) {
-  const url = 'https://zb.chinalco.com.cn/EWB-FRONT/rest/secaction/getSecInfoListYzmstr'
-  const body = new URLSearchParams({
-    siteGuid: CHINALCO_SITE_GUID,
-    categoryNum: '001003',
-    content: '',
-    pageIndex: '0',
-    pageSize: '10',
-    startdate: '',
-    enddate: ''
-  }).toString()
-  const res = await axios.post(url, body, {
-    timeout: 20000,
-    headers: {
-      'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
-      'User-Agent':
-        'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-      Referer: 'https://zb.chinalco.com.cn/zbxx/001003/bid_goods.html',
-      Origin: 'https://zb.chinalco.com.cn',
-      'X-Requested-With': 'XMLHttpRequest',
-      Accept: 'application/json, text/javascript, */*; q=0.01'
+  const all = []
+  for (let pageIndex = 0; pageIndex < 3; pageIndex++) {
+    const url =
+      'https://zb.chinalco.com.cn/EWB-FRONT/rest/secaction/getSecInfoListYzmstr'
+    const body = new URLSearchParams({
+      siteGuid: CHINALCO_SITE_GUID,
+      categoryNum: '001003',
+      content: '',
+      pageIndex: String(pageIndex),
+      pageSize: '10',
+      startdate: '',
+      enddate: ''
+    }).toString()
+    try {
+      const res = await axios.post(url, body, {
+        timeout: 20000,
+        headers: {
+          'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
+          'User-Agent':
+            'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+          Referer: 'https://zb.chinalco.com.cn/zbxx/001003/bid_goods.html',
+          Origin: 'https://zb.chinalco.com.cn',
+          'X-Requested-With': 'XMLHttpRequest',
+          Accept: 'application/json, text/javascript, */*; q=0.01'
+        }
+      })
+      const data = res.data
+      const items = Array.isArray(data?.data?.rows) ? data.data.rows : []
+      if (!items.length) break
+      all.push(
+        ...items.map(row => ({
+          title: row.title || row.infoname || '',
+          source_url: row.url || row.infourl || '',
+          publishDate: toISODate(
+            row.infodate || row.publish_date || row.releasetime
+          ),
+          site_id: site.id,
+          site_name: site.site_name
+        }))
+      )
+    } catch (e) {
+      console.error('Chinalco page fetch failed', e.message)
+      break
     }
-  })
-  const data = res.data
-  const items = Array.isArray(data?.data?.rows) ? data.data.rows : []
-  return items.map(row => ({
-    title: row.title || row.infoname || '',
-    source_url: row.url || row.infourl || '',
-    publishDate: toISODate(row.infodate || row.publish_date || row.releasetime),
-    site_id: site.id,
-    site_name: site.site_name
-  }))
+  }
+  return all
 }
 
 function buildTangDetailUrl(row) {
@@ -228,43 +243,57 @@ async function crawlTangApi(site) {
     return []
   }
   const url = 'https://tang.cdt-ec.com/notice/moreController/getList'
-  const body = new URLSearchParams({
-    pageIndex: '0',
-    pageSize: '20',
-    globleType: '0'
-  }).toString()
-  const res = await axios.post(url, body, {
-    timeout: 20000,
-    headers: {
-      Cookie: cookie,
-      'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
-      'User-Agent':
-        'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-      Referer: site.list_page_url || site.site_url || 'https://tang.cdt-ec.com',
-      Origin: 'https://tang.cdt-ec.com',
-      'X-Requested-With': 'XMLHttpRequest',
-      Accept: 'application/json, text/javascript, */*; q=0.01'
+  const all = []
+  for (let pageIndex = 0; pageIndex < 3; pageIndex++) {
+    const body = new URLSearchParams({
+      pageIndex: String(pageIndex),
+      pageSize: '20',
+      globleType: '0'
+    }).toString()
+    try {
+      const res = await axios.post(url, body, {
+        timeout: 20000,
+        headers: {
+          Cookie: cookie,
+          'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
+          'User-Agent':
+            'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+          Referer:
+            site.list_page_url || site.site_url || 'https://tang.cdt-ec.com',
+          Origin: 'https://tang.cdt-ec.com',
+          'X-Requested-With': 'XMLHttpRequest',
+          Accept: 'application/json, text/javascript, */*; q=0.01'
+        }
+      })
+      const data = res.data
+      const list =
+        Array.isArray(data?.data?.data) || Array.isArray(data?.data?.list)
+          ? data.data.data || data.data.list
+          : Array.isArray(data?.data)
+            ? data.data
+            : Array.isArray(data?.list)
+              ? data.list
+              : []
+      if (!list.length) break
+      all.push(
+        ...list
+          .map(row => ({
+            title: row.message_title || row.title || '',
+            source_url: buildTangDetailUrl(row),
+            publishDate:
+              toISODate(row.deadline || row.releasetime || row.publish_date) ||
+              null,
+            site_id: site.id,
+            site_name: site.site_name
+          }))
+          .filter(item => item.title && item.source_url)
+      )
+    } catch (e) {
+      console.error('Tang page fetch failed', e.message)
+      break
     }
-  })
-  const data = res.data
-  const list =
-    Array.isArray(data?.data?.data) || Array.isArray(data?.data?.list)
-      ? data.data.data || data.data.list
-      : Array.isArray(data?.data)
-        ? data.data
-        : Array.isArray(data?.list)
-          ? data.list
-          : []
-  return list
-    .map(row => ({
-      title: row.message_title || row.title || '',
-      source_url: buildTangDetailUrl(row),
-      publishDate:
-        toISODate(row.deadline || row.releasetime || row.publish_date) || null,
-      site_id: site.id,
-      site_name: site.site_name
-    }))
-    .filter(item => item.title && item.source_url)
+  }
+  return all
 }
 
 async function crawlHuanengApi(site) {
