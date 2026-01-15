@@ -53,17 +53,37 @@ async function main() {
     waitUntil: 'networkidle',
     timeout: 20000
   })
-  await page.waitForTimeout(3000)
+  await page.waitForTimeout(2000)
   if (!token) {
-    await page.waitForTimeout(2000)
     try {
-      const html = await page.content()
-      const m1 = html.match(/kbfJdf1e=([\w.\-]+)/)
-      const m2 = html.match(/"kbfJdf1e"\s*:\s*"([^"]+)"/)
-      token = token || (m1 ? m1[1] : null) || (m2 ? m2[1] : null)
-      if (token) tokenRequests.push('page-content-regex')
+      await page.evaluate(async () => {
+        try {
+          await fetch(
+            '/scm-uiaoauth-web/s/business/uiaouth/queryAnnouncementByTitle?kbfJdf1e=',
+            {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ title: '' })
+            }
+          )
+        } catch (e) {
+          console.error(e)
+        }
+      })
     } catch (_e) {
       // ignore
+    }
+    await page.waitForTimeout(2000)
+    if (!token) {
+      try {
+        const html = await page.content()
+        const m1 = html.match(/kbfJdf1e=([\w.\-]+)/)
+        const m2 = html.match(/"kbfJdf1e"\s*:\s*"([^"]+)"/)
+        token = token || (m1 ? m1[1] : null) || (m2 ? m2[1] : null)
+        if (token) tokenRequests.push('page-content-regex')
+      } catch (_e) {
+        // ignore
+      }
     }
   }
 
