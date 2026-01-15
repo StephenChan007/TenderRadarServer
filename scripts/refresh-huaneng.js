@@ -8,7 +8,18 @@ const OUTPUT_PATH =
   '/tmp/huaneng.json'
 
 async function main() {
-  const browser = await chromium.launch({ headless: true })
+  const candidates = [
+    process.env.CHROMIUM_PATH,
+    '/usr/bin/chromium-browser',
+    '/usr/lib/chromium/chrome'
+  ].filter(Boolean)
+  const executablePath = candidates.find(p => fs.existsSync(p))
+
+  const browser = await chromium.launch({
+    headless: true,
+    executablePath,
+    args: ['--no-sandbox']
+  })
   const context = await browser.newContext({
     viewport: { width: 1280, height: 720 },
     userAgent:

@@ -24,10 +24,10 @@ RUN npm config set registry https://mirrors.cloud.tencent.com/npm/
 
 # npm 安装依赖
 RUN npm install
-# Playwright 依赖（Alpine）
+# Playwright 依赖（Alpine）及系统 Chromium
 RUN apk add --no-cache nss freetype harfbuzz ttf-freefont chromium
-# 安装 Playwright Chromium
-RUN npx playwright install chromium
+# 使用系统 Chromium 路径
+ENV CHROMIUM_PATH=/usr/bin/chromium-browser
 
 # 将当前目录（dockerfile所在目录）下所有文件都拷贝到工作目录下（.dockerignore中文件除外）
 COPY . /app
