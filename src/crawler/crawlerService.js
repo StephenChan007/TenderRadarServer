@@ -310,7 +310,7 @@ async function crawlHuanengApi(site) {
   console.log('[Huaneng] Fetching list with token prefix:', token.slice(0, 6))
   const res = await axios.post(
     url,
-    { title: '' },
+    { type: '103' },
     {
       timeout: 20000,
       headers: {
