@@ -406,6 +406,7 @@ async function fetchHuanengApiViaPage({
 }) {
   const baseUrl =
     'https://ec.chng.com.cn/scm-uiaoauth-web/s/business/uiaouth/queryAnnouncementByTitle'
+  const referer = site.list_page_url || site.site_url || DEFAULT_HUANENG_URL
   for (const t of types) {
     const attempts = []
     if (token) attempts.push(`${baseUrl}?kbfJdf1e=${encodeURIComponent(token)}`)
@@ -417,7 +418,9 @@ async function fetchHuanengApiViaPage({
           data: { type: t },
           headers: {
             'Content-Type': 'application/json',
-            Accept: 'application/json, text/plain, */*'
+            Accept: 'application/json, text/plain, */*',
+            Referer: referer,
+            Origin: 'https://ec.chng.com.cn'
           },
           timeout: 20000
         })
@@ -613,6 +616,7 @@ async function crawlHuanengApi(site) {
   const types = ['103', '107']
   const items = []
   const added = new Set()
+  const referer = site.list_page_url || site.site_url || DEFAULT_HUANENG_URL
   for (const t of types) {
     const url = `https://ec.chng.com.cn/scm-uiaoauth-web/s/business/uiaouth/queryAnnouncementByTitle?kbfJdf1e=${encodeURIComponent(
       token || ''
@@ -629,7 +633,8 @@ async function crawlHuanengApi(site) {
             Cookie: cookie,
             'User-Agent':
               'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-            Referer: 'https://ec.chng.com.cn/channel/home/',
+            Referer: referer,
+            Origin: 'https://ec.chng.com.cn',
             'Content-Type': 'application/json',
             Accept: 'application/json, text/plain, */*',
             'Accept-Language': 'zh-CN,zh;q=0.9'
