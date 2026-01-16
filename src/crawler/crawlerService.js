@@ -15,12 +15,16 @@ const TANG_JSON_PATH =
 const DEFAULT_HUANENG_URL = 'https://ec.chng.com.cn/channel/home/'
 
 function resolveChromiumPath() {
-  const bundled = chromium.executablePath && chromium.executablePath()
+  const bundled =
+    typeof chromium.executablePath === 'function'
+      ? chromium.executablePath()
+      : null
   const bundledPath = bundled && fs.existsSync(bundled) ? bundled : null
   const candidates = [
     bundledPath,
     process.env.CHROMIUM_PATH,
     process.env.CHROMIUM_PATH,
+    '/usr/bin/chromium',
     '/usr/bin/chromium-browser',
     '/usr/lib/chromium/chrome'
   ].filter(Boolean)
