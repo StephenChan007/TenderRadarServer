@@ -17,6 +17,7 @@ const DEFAULT_HUANENG_URL = 'https://ec.chng.com.cn/channel/home/'
 function resolveChromiumPath() {
   const candidates = [
     process.env.CHROMIUM_PATH,
+    process.env.CHROMIUM_PATH,
     '/usr/bin/chromium-browser',
     '/usr/lib/chromium/chrome'
   ].filter(Boolean)

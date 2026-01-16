@@ -10,6 +10,7 @@ const OUTPUT_PATH =
 async function main() {
   const candidates = [
     process.env.CHROMIUM_PATH,
+    process.env.CHROMIUM_PATH,
     '/usr/bin/chromium-browser',
     '/usr/lib/chromium/chrome'
   ].filter(Boolean)
