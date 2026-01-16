@@ -18,6 +18,7 @@ const HN_USER_AGENT =
 const HN_SEC_CH_UA =
   '"Google Chrome";v="143", "Chromium";v="143", "Not A(Brand";v="24"'
 const HN_SEC_CH_UA_PLATFORM = '"Windows"'
+const HN_ANNOUNCEMENT_URL = 'https://ec.chng.com.cn/#/announcement'
 
 function resolveChromiumPath() {
   const bundled =
@@ -323,6 +324,8 @@ async function crawlTangApi(site) {
 function parseHuanengRows(data) {
   return Array.isArray(data)
     ? data
+    : Array.isArray(data?.root)
+      ? data.root
     : Array.isArray(data?.data)
       ? data.data
       : Array.isArray(data?.rows)
@@ -536,7 +539,8 @@ async function crawlHuanengWithBrowser(site) {
       }
     })
 
-    const targetUrl = site.list_page_url || site.site_url || DEFAULT_HUANENG_URL
+    const targetUrl =
+      site.list_page_url || site.site_url || HN_ANNOUNCEMENT_URL || DEFAULT_HUANENG_URL
     try {
       await page.goto(targetUrl, { waitUntil: 'networkidle', timeout: 30000 })
     } catch (e) {
