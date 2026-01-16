@@ -556,9 +556,9 @@ async function crawlHuanengApi(site) {
   const { cookie: envCookie, token: envToken } = loadHuanengCreds()
   const token = browserToken || envToken
   const cookie = browserCookie || envCookie
-  if (!cookie || !token) {
+  if (!cookie) {
     console.warn(
-      '华能抓取跳过：浏览器模式无数据且未配置 HUANENG_COOKIE/HUANENG_TOKEN 或 HUANENG_JSON_PATH'
+      '华能抓取跳过：无可用 Cookie，浏览器和环境均未提供'
     )
     return []
   }
@@ -569,9 +569,10 @@ async function crawlHuanengApi(site) {
   const added = new Set()
   for (const t of types) {
     const url = `https://ec.chng.com.cn/scm-uiaoauth-web/s/business/uiaouth/queryAnnouncementByTitle?kbfJdf1e=${encodeURIComponent(
-      token
+      token || ''
     )}`
-    console.log(`[华能] 接口抓取类型 ${t}，token 前缀：${token.slice(0, 6)}`)
+    const tokenPrefix = token ? token.slice(0, 6) : 'empty'
+    console.log(`[华能] 接口抓取类型 ${t}，token 前缀：${tokenPrefix}`)
     try {
       const res = await axios.post(
         url,
