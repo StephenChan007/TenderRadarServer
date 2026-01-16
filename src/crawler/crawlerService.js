@@ -448,7 +448,16 @@ async function fetchHuanengApiViaPage({
     for (const url of attempts) {
       try {
         const json = await axiosInPage(page, url, { type: t })
-        collectHuanengRows(parseHuanengRows(json), site, added, items)
+        const rows = parseHuanengRows(json)
+        const count = Array.isArray(rows) ? rows.length : 0
+        if (!count) {
+          const msg = json?.message || json?.msg || ''
+          console.warn(
+            `[华能] 页面接口类型 ${t} 返回 0 条，code: ${json?.code || ''} msg: ${msg}`
+          )
+          console.warn(`[华能] 页面接口类型 ${t} 原始响应: ${JSON.stringify(json).slice(0, 500)}`)
+        }
+        collectHuanengRows(rows, site, added, items)
         seenTypes.add(t)
         console.log(
           `[华能] 页面接口类型 ${t} 返回 ${items.length} 条 (累计)，使用 URL: ${url}`
