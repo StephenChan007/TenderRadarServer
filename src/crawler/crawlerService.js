@@ -395,6 +395,8 @@ async function crawlHuanengWithBrowser(site) {
   const seenTypes = new Set()
   let token = null
   let browser = null
+  let context = null
+  let page = null
 
   try {
     browser = await chromium.launch({
@@ -404,17 +406,17 @@ async function crawlHuanengWithBrowser(site) {
     })
   } catch (e) {
     console.error('[华能] 浏览器启动失败：', e.message)
-    return []
+    return { items, token: null, cookie: null }
   }
 
   try {
-    const context = await browser.newContext({
+    context = await browser.newContext({
       viewport: { width: 1280, height: 720 },
       userAgent:
         'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36',
       extraHTTPHeaders: { 'Accept-Language': 'zh-CN,zh;q=0.9' }
     })
-    const page = await context.newPage()
+    page = await context.newPage()
 
     page.on('request', req => {
       const url = req.url()
@@ -429,6 +431,8 @@ async function crawlHuanengWithBrowser(site) {
     })
 
     page.on('response', async res => {
+      if (!page || page.isClosed()) return
+      if (res.status && res.status() >= 400) return
       const url = res.url()
       if (!url.includes('queryAnnouncementByTitle')) return
       try {
@@ -501,16 +505,27 @@ async function crawlHuanengWithBrowser(site) {
       }
     }
 
+    const cookieStr = context
+      ? (await context.cookies('https://ec.chng.com.cn'))
+          .map(c => `${c.name}=${c.value}`)
+          .join('; ')
+      : null
+
     if (items.length) {
       console.log(`[华能] 浏览器抓取得到 ${items.length} 条数据`)
     } else {
       console.warn('[华能] 浏览器抓取未获取到数据')
     }
 
-    return items
+    return { items, token, cookie: cookieStr }
   } catch (e) {
+    const cookieStr = context
+      ? (await context.cookies('https://ec.chng.com.cn'))
+          .map(c => `${c.name}=${c.value}`)
+          .join('; ')
+      : null
     console.error('[华能] 浏览器抓取异常：', e.message)
-    return items
+    return { items, token: token || null, cookie: cookieStr }
   } finally {
     if (browser) {
       try {
@@ -523,10 +538,16 @@ async function crawlHuanengWithBrowser(site) {
 }
 
 async function crawlHuanengApi(site) {
-  const browserItems = await crawlHuanengWithBrowser(site)
-  if (browserItems.length) return browserItems
+  const {
+    items: browserItems,
+    token: browserToken,
+    cookie: browserCookie
+  } = (await crawlHuanengWithBrowser(site)) || { items: [], token: null, cookie: null }
+  if (Array.isArray(browserItems) && browserItems.length) return browserItems
 
-  const { cookie, token } = loadHuanengCreds()
+  const { cookie: envCookie, token: envToken } = loadHuanengCreds()
+  const token = browserToken || envToken
+  const cookie = browserCookie || envCookie
   if (!cookie || !token) {
     console.warn(
       '华能抓取跳过：浏览器模式无数据且未配置 HUANENG_COOKIE/HUANENG_TOKEN 或 HUANENG_JSON_PATH'
@@ -543,25 +564,29 @@ async function crawlHuanengApi(site) {
       token
     )}`
     console.log(`[华能] 接口抓取类型 ${t}，token 前缀：${token.slice(0, 6)}`)
-    const res = await axios.post(
-      url,
-      { type: t },
-      {
-        timeout: 20000,
-        headers: {
-          Cookie: cookie,
-          'User-Agent':
-            'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-          Referer: 'https://ec.chng.com.cn/channel/home/',
-          'Content-Type': 'application/json',
-          Accept: 'application/json, text/plain, */*',
-          'Accept-Language': 'zh-CN,zh;q=0.9'
+    try {
+      const res = await axios.post(
+        url,
+        { type: t },
+        {
+          timeout: 20000,
+          headers: {
+            Cookie: cookie,
+            'User-Agent':
+              'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+            Referer: 'https://ec.chng.com.cn/channel/home/',
+            'Content-Type': 'application/json',
+            Accept: 'application/json, text/plain, */*',
+            'Accept-Language': 'zh-CN,zh;q=0.9'
+          }
         }
-      }
-    )
-    const rows = parseHuanengRows(res.data)
-    console.log(`[华能] 类型 ${t} 返回 ${rows.length} 条`)
-    collectHuanengRows(rows, site, added, items)
+      )
+      const rows = parseHuanengRows(res.data)
+      console.log(`[华能] 类型 ${t} 返回 ${rows.length} 条`)
+      collectHuanengRows(rows, site, added, items)
+    } catch (e) {
+      console.error(`[华能] 接口类型 ${t} 失败：`, e.message)
+    }
   }
   return items
 }
