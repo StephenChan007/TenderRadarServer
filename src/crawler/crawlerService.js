@@ -67,9 +67,26 @@ function loadTangCookie() {
 async function axiosInPage(page, url, data) {
   return await page.evaluate(
     async ({ url, data }) => {
-      if (!window.axios) throw new Error('axios not found on page')
-      const res = await window.axios.post(url, data)
-      return res?.data || null
+      const runFetch = async () => {
+        const res = await fetch(url, {
+          method: 'POST',
+          credentials: 'include',
+          headers: {
+            'Content-Type': 'application/json',
+            Accept: 'application/json, text/plain, */*'
+          },
+          body: JSON.stringify(data || {})
+        })
+        if (!res.ok) {
+          throw new Error(`fetch status ${res.status}`)
+        }
+        return await res.json()
+      }
+      if (window.axios) {
+        const res = await window.axios.post(url, data)
+        return res?.data || null
+      }
+      return await runFetch()
     },
     { url, data }
   )
