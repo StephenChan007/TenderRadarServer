@@ -395,6 +395,54 @@ async function tryExtractHuanengToken(page) {
   }
 }
 
+async function fetchHuanengApiViaPage({
+  page,
+  types,
+  token,
+  site,
+  added,
+  items,
+  seenTypes
+}) {
+  const baseUrl =
+    'https://ec.chng.com.cn/scm-uiaoauth-web/s/business/uiaouth/queryAnnouncementByTitle'
+  for (const t of types) {
+    const attempts = []
+    if (token) attempts.push(`${baseUrl}?kbfJdf1e=${encodeURIComponent(token)}`)
+    attempts.push(`${baseUrl}?kbfJdf1e=`)
+    attempts.push(baseUrl)
+    for (const url of attempts) {
+      try {
+        const resp = await page.request.post(url, {
+          data: { type: t },
+          headers: {
+            'Content-Type': 'application/json',
+            Accept: 'application/json, text/plain, */*'
+          },
+          timeout: 20000
+        })
+        const status = resp.status()
+        if (status >= 400) {
+          console.warn(`[华能] 页面接口 ${url} 状态 ${status}`)
+          continue
+        }
+        const json = await resp.json()
+        collectHuanengRows(parseHuanengRows(json), site, added, items)
+        seenTypes.add(t)
+        console.log(
+          `[华能] 页面接口类型 ${t} 返回 ${items.length} 条 (累计)，使用 URL: ${url}`
+        )
+        break
+      } catch (e) {
+        console.error(
+          `[华能] 页面接口类型 ${t} 请求失败（${url}）：`,
+          e.message
+        )
+      }
+    }
+  }
+}
+
 async function crawlHuanengWithBrowser(site) {
   const executablePath = resolveChromiumPath()
   const added = new Set()
@@ -489,27 +537,25 @@ async function crawlHuanengWithBrowser(site) {
       const tokenValue = token || (await tryExtractHuanengToken(page))
       if (tokenValue) {
         token = tokenValue
-        for (const t of targetTypes) {
-          if (seenTypes.has(t)) continue
-          const apiUrl = `https://ec.chng.com.cn/scm-uiaoauth-web/s/business/uiaouth/queryAnnouncementByTitle?kbfJdf1e=${encodeURIComponent(
-            tokenValue
-          )}`
-          try {
-            const resp = await page.request.post(apiUrl, {
-              data: { type: t },
-              headers: {
-                'Content-Type': 'application/json',
-                Accept: 'application/json, text/plain, */*'
-              },
-              timeout: 20000
-            })
-            const json = await resp.json()
-            collectHuanengRows(parseHuanengRows(json), site, added, items)
-            seenTypes.add(t)
-          } catch (e) {
-            console.error(`[华能] 类型${t}补拉失败：`, e.message)
-          }
-        }
+        await fetchHuanengApiViaPage({
+          page,
+          types: targetTypes.filter(t => !seenTypes.has(t)),
+          token: tokenValue,
+          site,
+          added,
+          items,
+          seenTypes
+        })
+      } else {
+        await fetchHuanengApiViaPage({
+          page,
+          types: targetTypes.filter(t => !seenTypes.has(t)),
+          token: null,
+          site,
+          added,
+          items,
+          seenTypes
+        })
       }
     }
 
