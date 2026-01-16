@@ -26,4 +26,4 @@ RUN npm ci --omit=dev \
 
 COPY . /app
 
-CMD ["npm", "run", "start:auto"]
+CMD ["npm", "start"]

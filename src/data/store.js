@@ -136,6 +136,7 @@ let userProfile = {
   nickname: '',
   avatar: ''
 }
+const subscribers = []
 
 function nextId(list) {
   if (!Array.isArray(list) || list.length === 0) return 1
@@ -443,6 +444,46 @@ async function updateSubscriptionStatus({ enabled, tmplIds }) {
   return subscriptionStatus
 }
 
+async function getSubscribers() {
+  if (redis) {
+    const cached = await redis.get('subscription:users')
+    if (cached) {
+      try {
+        return JSON.parse(cached)
+      } catch (_e) {
+        return subscribers
+      }
+    }
+  }
+  return subscribers
+}
+
+async function saveSubscribers(list) {
+  if (redis) {
+    await redis.set('subscription:users', JSON.stringify(list || []))
+  }
+}
+
+async function upsertSubscriber({ openid, tmplIds }) {
+  if (!openid) return null
+  const list = await getSubscribers()
+  const existing = list.find(item => item.openid === openid)
+  const now = new Date().toISOString()
+  if (existing) {
+    existing.tmplIds = Array.isArray(tmplIds) && tmplIds.length ? tmplIds : existing.tmplIds || []
+    existing.updatedAt = now
+  } else {
+    list.push({
+      openid,
+      tmplIds: Array.isArray(tmplIds) && tmplIds.length ? tmplIds : [],
+      createdAt: now,
+      updatedAt: now
+    })
+  }
+  await saveSubscribers(list)
+  return existing || list[list.length - 1]
+}
+
 async function getUserProfile() {
   if (redis) {
     const cached = await redis.get('user:profile:default')
@@ -547,6 +588,8 @@ module.exports = {
   addSite,
   getSubscriptionStatus,
   updateSubscriptionStatus,
+  getSubscribers,
+  upsertSubscriber,
   getUserProfile,
   updateUserProfile,
   paginate

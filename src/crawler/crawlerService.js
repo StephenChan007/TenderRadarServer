@@ -3,6 +3,7 @@ const cheerio = require('cheerio')
 const fs = require('fs')
 const { chromium } = require('playwright-chromium')
 const { addNotice, hasNotice, getKeywords, getSites } = require('../data/store')
+const { notifyMatchedNotice } = require('../notify/notifyService')
 
 const HN_COOKIE = process.env.HUANENG_COOKIE || process.env.HN_COOKIE || ''
 const HN_TOKEN = process.env.HUANENG_TOKEN || process.env.HN_TOKEN || ''
@@ -16,6 +17,7 @@ const DEFAULT_HUANENG_URL = 'https://ec.chng.com.cn/channel/home/'
 const HN_USER_AGENT =
   'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/143.0.0.0 Safari/537.36'
 const HN_ANNOUNCEMENT_URL = 'https://ec.chng.com.cn/#/announcement'
+let latestHuanengCookie = ''
 
 function resolveChromiumPath() {
   const bundled =
@@ -152,12 +154,26 @@ async function matchKeywords(title, content) {
 
 async function fetchDetailContent(url) {
   if (!url) return ''
+  let cookieHeader = ''
+  let referer = null
+  try {
+    const parsed = new URL(url)
+    if (parsed.hostname.includes('ec.chng.com.cn')) {
+      const envCookie = loadHuanengCreds().cookie || ''
+      cookieHeader = latestHuanengCookie || envCookie
+      referer = 'https://ec.chng.com.cn/'
+    }
+  } catch (_e) {
+    // ignore parse error
+  }
   try {
     const res = await axios.get(url, {
       timeout: 20000,
       headers: {
         'User-Agent':
-          'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+          'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+        ...(cookieHeader ? { Cookie: cookieHeader } : {}),
+        ...(referer ? { Referer: referer } : {})
       }
     })
     const $ = cheerio.load(res.data || '')
@@ -361,18 +377,43 @@ function parseHuanengRows(data) {
 }
 
 function normalizeHuanengRow(row, site) {
-  const title = row.title || row.noticeTitle || row.announcementTitle
-  const link = row.url || row.noticeUrl || row.detailUrl || row.href || row.link
+  const title =
+    row.title ||
+    row.noticeTitle ||
+    row.announcementTitle ||
+    row.message_title ||
+    row.projectName
+  const link =
+    row.url ||
+    row.noticeUrl ||
+    row.detailUrl ||
+    row.href ||
+    row.link ||
+    row.announcementUrl
+  const id =
+    row.announcementId ||
+    row.noticeId ||
+    row.id ||
+    row.notice_id ||
+    row.noticeid
+  const resolvedLink =
+    link ||
+    (id
+      ? `https://ec.chng.com.cn/#/announcement/detail?announcementId=${id}`
+      : null)
   const date =
     row.publishDate ||
     row.releaseDate ||
     row.date ||
     row.release_time ||
     row.publish_time
-  if (!title || !link) return null
+  if (!title || !resolvedLink) return null
   return {
     title,
-    source_url: normalizeUrl(link, site.site_url || 'https://ec.chng.com.cn'),
+    source_url: normalizeUrl(
+      resolvedLink,
+      site.site_url || 'https://ec.chng.com.cn'
+    ),
     publishDate: toISODate(date),
     site_id: site.id,
     site_name: site.site_name
@@ -387,6 +428,40 @@ function collectHuanengRows(rows, site, added, target) {
     if (added.has(key)) continue
     added.add(key)
     target.push(normalized)
+  }
+}
+
+async function handleHuanengResponse(response, site, added, items, seenTypes) {
+  const url = response.url()
+  if (!url.includes('queryAnnouncementByTitle')) return
+  try {
+    const req = response.request()
+    let type = null
+    try {
+      const body = req.postData()
+      if (body) {
+        const parsed = JSON.parse(body)
+        type = parsed?.type || parsed?.noticeType || null
+      }
+    } catch (_e) {
+      // ignore parse errors
+    }
+    let tokenFromUrl = null
+    try {
+      const parsedUrl = new URL(url)
+      tokenFromUrl = parsedUrl.searchParams.get('kbfJdf1e') || null
+    } catch (_e) {
+      // ignore
+    }
+    const data = await response.json()
+    const rows = parseHuanengRows(data)
+    collectHuanengRows(rows, site, added, items)
+    if (type) seenTypes.add(String(type))
+    console.log(
+      `[华能] 页面响应${type ? ` 类型 ${type}` : ''} 返回 ${rows.length} 条，token: ${tokenFromUrl ? tokenFromUrl.slice(0, 6) : '未知'}`
+    )
+  } catch (e) {
+    console.error('[华能] 解析页面响应失败：', e.message)
   }
 }
 
@@ -474,12 +549,12 @@ async function crawlHuanengWithBrowser(site) {
   const executablePath = resolveChromiumPath()
   const added = new Set()
   const items = []
-  const targetTypes = ['103', '107']
   const seenTypes = new Set()
   let token = null
   let browser = null
   let context = null
   let page = null
+  const pendingResponses = new Set()
 
   try {
     browser = await chromium.launch({
@@ -513,6 +588,13 @@ async function crawlHuanengWithBrowser(site) {
         // ignore
       }
     })
+    page.on('response', res => {
+      const p = handleHuanengResponse(res, site, added, items, seenTypes)
+      if (p && typeof p.then === 'function') {
+        pendingResponses.add(p)
+        p.finally(() => pendingResponses.delete(p))
+      }
+    })
 
     const targetUrl =
       site.list_page_url || site.site_url || HN_ANNOUNCEMENT_URL || DEFAULT_HUANENG_URL
@@ -532,21 +614,12 @@ async function crawlHuanengWithBrowser(site) {
     }
     await page.waitForTimeout(3000)
 
-    if (targetTypes.some(t => !seenTypes.has(t))) {
-      const tokenValue = token || (await tryExtractHuanengToken(page))
+    if (pendingResponses.size) {
+      await Promise.all([...pendingResponses])
+    }
+    if (!token) {
+      const tokenValue = await tryExtractHuanengToken(page)
       token = tokenValue || null
-      if (!token) {
-        throw new Error('token not found in browser context')
-      }
-      await fetchHuanengApiViaPage({
-        page,
-        types: targetTypes.filter(t => !seenTypes.has(t)),
-        token,
-        site,
-        added,
-        items,
-        seenTypes
-      })
     }
 
     const cookieStr = context
@@ -554,11 +627,12 @@ async function crawlHuanengWithBrowser(site) {
           .map(c => `${c.name}=${c.value}`)
           .join('; ')
       : null
+    if (cookieStr) latestHuanengCookie = cookieStr
 
     if (items.length) {
-      console.log(`[华能] 浏览器抓取得到 ${items.length} 条数据`)
+      console.log(`[华能] 浏览器监听获取 ${items.length} 条数据`)
     } else {
-      console.warn('[华能] 浏览器抓取未获取到数据')
+      console.warn('[华能] 浏览器监听未捕获到数据')
     }
 
     return { items, token, cookie: cookieStr }
@@ -646,7 +720,7 @@ async function processNotice(raw, site) {
   const content = await fetchDetailContent(raw.source_url)
   const matched = await matchKeywords(raw.title, content)
   if (!matched.length) return
-  await addNotice({
+  const saved = await addNotice({
     title: raw.title,
     site_name: site.site_name,
     site_id: site.id,
@@ -654,6 +728,9 @@ async function processNotice(raw, site) {
     content: content || raw.title,
     source_url: raw.source_url
   })
+  if (saved) {
+    await notifyMatchedNotice(saved, matched)
+  }
 }
 
 async function crawlSite(site) {

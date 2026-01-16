@@ -5,10 +5,7 @@
   "main": "index.js",
   "scripts": {
     "start": "node index.js",
-    "dev": "nodemon index.js",
-    "refresh:huaneng": "node scripts/refresh-huaneng.js",
-    "refresh:tang": "node scripts/refresh-tang.js",
-    "start:auto": "node scripts/refresh-huaneng.js >/tmp/refresh-huaneng.log 2>&1 & node scripts/refresh-tang.js >/tmp/refresh-tang.log 2>&1 & node index.js"
+    "dev": "nodemon index.js"
   },
   "engines": {
     "node": ">=20"
