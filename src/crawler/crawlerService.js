@@ -13,6 +13,11 @@ const TANG_COOKIE = process.env.TANG_COOKIE || ''
 const TANG_JSON_PATH =
   process.env.TANG_JSON_PATH || process.env.TANG_COOKIE_PATH || '/tmp/tang.json'
 const DEFAULT_HUANENG_URL = 'https://ec.chng.com.cn/channel/home/'
+const HN_USER_AGENT =
+  'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/143.0.0.0 Safari/537.36'
+const HN_SEC_CH_UA =
+  '"Google Chrome";v="143", "Chromium";v="143", "Not A(Brand";v="24"'
+const HN_SEC_CH_UA_PLATFORM = '"Windows"'
 
 function resolveChromiumPath() {
   const bundled =
@@ -420,7 +425,10 @@ async function fetchHuanengApiViaPage({
             'Content-Type': 'application/json',
             Accept: 'application/json, text/plain, */*',
             Referer: referer,
-            Origin: 'https://ec.chng.com.cn'
+            Origin: 'https://ec.chng.com.cn',
+            'sec-ch-ua': HN_SEC_CH_UA,
+            'sec-ch-ua-mobile': '?0',
+            'sec-ch-ua-platform': HN_SEC_CH_UA_PLATFORM
           },
           timeout: 20000
         })
@@ -461,7 +469,7 @@ async function crawlHuanengWithBrowser(site) {
     browser = await chromium.launch({
       headless: true,
       executablePath: executablePath || undefined,
-      args: ['--no-sandbox']
+      args: ['--no-sandbox', '--disable-dev-shm-usage', '--disable-blink-features=AutomationControlled']
     })
   } catch (e) {
     console.error('[华能] 浏览器启动失败：', e.message)
@@ -471,9 +479,13 @@ async function crawlHuanengWithBrowser(site) {
   try {
     context = await browser.newContext({
       viewport: { width: 1280, height: 720 },
-      userAgent:
-        'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36',
-      extraHTTPHeaders: { 'Accept-Language': 'zh-CN,zh;q=0.9' }
+      userAgent: HN_USER_AGENT,
+      extraHTTPHeaders: {
+        'Accept-Language': 'zh-CN,zh;q=0.9',
+        'sec-ch-ua': HN_SEC_CH_UA,
+        'sec-ch-ua-mobile': '?0',
+        'sec-ch-ua-platform': HN_SEC_CH_UA_PLATFORM
+      }
     })
     page = await context.newPage()
 
@@ -531,9 +543,9 @@ async function crawlHuanengWithBrowser(site) {
       console.error('[华能] 页面打开失败：', e.message)
     }
 
-    await page.waitForTimeout(4000)
+    await page.waitForTimeout(5000)
     if (!items.length) {
-      await page.waitForTimeout(2000)
+      await page.waitForTimeout(3000)
     }
 
     if (targetTypes.some(t => !seenTypes.has(t))) {
