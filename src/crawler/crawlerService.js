@@ -15,9 +15,6 @@ const TANG_JSON_PATH =
 const DEFAULT_HUANENG_URL = 'https://ec.chng.com.cn/channel/home/'
 const HN_USER_AGENT =
   'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/143.0.0.0 Safari/537.36'
-const HN_SEC_CH_UA =
-  '"Google Chrome";v="143", "Chromium";v="143", "Not A(Brand";v="24"'
-const HN_SEC_CH_UA_PLATFORM = '"Windows"'
 const HN_ANNOUNCEMENT_URL = 'https://ec.chng.com.cn/#/announcement'
 
 function resolveChromiumPath() {
@@ -65,6 +62,17 @@ function loadTangCookie() {
     }
   }
   return cookie
+}
+
+async function axiosInPage(page, url, data) {
+  return await page.evaluate(
+    async ({ url, data }) => {
+      if (!window.axios) throw new Error('axios not found on page')
+      const res = await window.axios.post(url, data)
+      return res?.data || null
+    },
+    { url, data }
+  )
 }
 
 function normalizeUrl(url, base) {
@@ -422,25 +430,7 @@ async function fetchHuanengApiViaPage({
     attempts.push(baseUrl)
     for (const url of attempts) {
       try {
-        const resp = await page.request.post(url, {
-          data: { type: t },
-          headers: {
-            'Content-Type': 'application/json',
-            Accept: 'application/json, text/plain, */*',
-            Referer: referer,
-            Origin: 'https://ec.chng.com.cn',
-            'sec-ch-ua': HN_SEC_CH_UA,
-            'sec-ch-ua-mobile': '?0',
-            'sec-ch-ua-platform': HN_SEC_CH_UA_PLATFORM
-          },
-          timeout: 20000
-        })
-        const status = resp.status()
-        if (status >= 400) {
-          console.warn(`[华能] 页面接口 ${url} 状态 ${status}`)
-          continue
-        }
-        const json = await resp.json()
+        const json = await axiosInPage(page, url, { type: t })
         collectHuanengRows(parseHuanengRows(json), site, added, items)
         seenTypes.add(t)
         console.log(
@@ -448,10 +438,7 @@ async function fetchHuanengApiViaPage({
         )
         break
       } catch (e) {
-        console.error(
-          `[华能] 页面接口类型 ${t} 请求失败（${url}）：`,
-          e.message
-        )
+        console.error(`[华能] 页面接口类型 ${t} 请求失败（${url}）：`, e.message)
       }
     }
   }
@@ -484,10 +471,7 @@ async function crawlHuanengWithBrowser(site) {
       viewport: { width: 1280, height: 720 },
       userAgent: HN_USER_AGENT,
       extraHTTPHeaders: {
-        'Accept-Language': 'zh-CN,zh;q=0.9',
-        'sec-ch-ua': HN_SEC_CH_UA,
-        'sec-ch-ua-mobile': '?0',
-        'sec-ch-ua-platform': HN_SEC_CH_UA_PLATFORM
+        'Accept-Language': 'zh-CN,zh;q=0.9'
       }
     })
     page = await context.newPage()
@@ -504,41 +488,6 @@ async function crawlHuanengWithBrowser(site) {
       }
     })
 
-    page.on('response', async res => {
-      if (!page || page.isClosed()) return
-      if (res.status && res.status() >= 400) return
-      const url = res.url()
-      if (!url.includes('queryAnnouncementByTitle')) return
-      try {
-        const req = res.request()
-        const body = req.postData() || ''
-        let reqType = null
-        if (body) {
-          try {
-            const parsed = JSON.parse(body)
-            if (parsed?.type) reqType = String(parsed.type)
-          } catch (_e) {
-            const m = body.match(/type=([^&]+)/)
-            if (m) reqType = decodeURIComponent(m[1])
-          }
-        }
-        const data = await res.json()
-        collectHuanengRows(parseHuanengRows(data), site, added, items)
-        if (reqType) seenTypes.add(reqType)
-        if (!token) {
-          try {
-            const parsed = new URL(url)
-            const t = parsed.searchParams.get('kbfJdf1e')
-            if (t) token = t
-          } catch (_e) {
-            // ignore
-          }
-        }
-      } catch (e) {
-        console.error('[华能] 解析响应失败：', e.message)
-      }
-    })
-
     const targetUrl =
       site.list_page_url || site.site_url || HN_ANNOUNCEMENT_URL || DEFAULT_HUANENG_URL
     try {
@@ -547,35 +496,31 @@ async function crawlHuanengWithBrowser(site) {
       console.error('[华能] 页面打开失败：', e.message)
     }
 
-    await page.waitForTimeout(5000)
-    if (!items.length) {
-      await page.waitForTimeout(3000)
+    try {
+      await page.waitForResponse(
+        r => r.url().includes('queryAnnouncementByTitle') && r.status() === 200,
+        { timeout: 3000 }
+      )
+    } catch (_e) {
+      // ignore
     }
+    await page.waitForTimeout(3000)
 
     if (targetTypes.some(t => !seenTypes.has(t))) {
       const tokenValue = token || (await tryExtractHuanengToken(page))
-      if (tokenValue) {
-        token = tokenValue
-        await fetchHuanengApiViaPage({
-          page,
-          types: targetTypes.filter(t => !seenTypes.has(t)),
-          token: tokenValue,
-          site,
-          added,
-          items,
-          seenTypes
-        })
-      } else {
-        await fetchHuanengApiViaPage({
-          page,
-          types: targetTypes.filter(t => !seenTypes.has(t)),
-          token: null,
-          site,
-          added,
-          items,
-          seenTypes
-        })
+      token = tokenValue || null
+      if (!token) {
+        throw new Error('token not found in browser context')
       }
+      await fetchHuanengApiViaPage({
+        page,
+        types: targetTypes.filter(t => !seenTypes.has(t)),
+        token,
+        site,
+        added,
+        items,
+        seenTypes
+      })
     }
 
     const cookieStr = context
