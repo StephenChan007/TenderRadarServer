@@ -8,11 +8,12 @@ WORKDIR /app
 
 COPY package*.json /app/
 
-# npm 源，可按需替换为国内源
-RUN npm config set registry https://registry.npmjs.org/
+# npm 源（国内加速）
+RUN npm config set registry https://registry.npmmirror.com/
 
-# 系统依赖与 Chromium（瘦身版，无建议依赖）
-RUN apt-get update \
+# 系统依赖：Chromium（瘦身版，国内源）
+RUN sed -i 's|deb.debian.org|mirrors.aliyun.com|g' /etc/apt/sources.list \
+ && apt-get update \
  && apt-get install -y --no-install-recommends \
     chromium \
     ca-certificates \
