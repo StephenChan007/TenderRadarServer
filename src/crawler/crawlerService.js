@@ -1,6 +1,7 @@
 const axios = require('axios')
 const cheerio = require('cheerio')
 const fs = require('fs')
+const { chromium } = require('playwright-chromium')
 const { addNotice, hasNotice, getKeywords, getSites } = require('../data/store')
 
 const HN_COOKIE = process.env.HUANENG_COOKIE || process.env.HN_COOKIE || ''
@@ -11,6 +12,16 @@ const CHINALCO_SITE_GUID = '7eb5f7f1-9041-43ad-8e13-8fcb82ea831a'
 const TANG_COOKIE = process.env.TANG_COOKIE || ''
 const TANG_JSON_PATH =
   process.env.TANG_JSON_PATH || process.env.TANG_COOKIE_PATH || '/tmp/tang.json'
+const DEFAULT_HUANENG_URL = 'https://ec.chng.com.cn/channel/home/'
+
+function resolveChromiumPath() {
+  const candidates = [
+    process.env.CHROMIUM_PATH,
+    '/usr/bin/chromium-browser',
+    '/usr/lib/chromium/chrome'
+  ].filter(Boolean)
+  return candidates.find(p => fs.existsSync(p)) || null
+}
 
 function loadHuanengCreds() {
   let cookie = HN_COOKIE
@@ -296,21 +307,242 @@ async function crawlTangApi(site) {
   return all
 }
 
+function parseHuanengRows(data) {
+  return Array.isArray(data)
+    ? data
+    : Array.isArray(data?.data)
+      ? data.data
+      : Array.isArray(data?.rows)
+        ? data.rows
+        : Array.isArray(data?.body?.data)
+          ? data.body.data
+          : []
+}
+
+function normalizeHuanengRow(row, site) {
+  const title = row.title || row.noticeTitle || row.announcementTitle
+  const link = row.url || row.noticeUrl || row.detailUrl || row.href || row.link
+  const date =
+    row.publishDate ||
+    row.releaseDate ||
+    row.date ||
+    row.release_time ||
+    row.publish_time
+  if (!title || !link) return null
+  return {
+    title,
+    source_url: normalizeUrl(link, site.site_url || 'https://ec.chng.com.cn'),
+    publishDate: toISODate(date),
+    site_id: site.id,
+    site_name: site.site_name
+  }
+}
+
+function collectHuanengRows(rows, site, added, target) {
+  for (const row of rows) {
+    const normalized = normalizeHuanengRow(row, site)
+    if (!normalized) continue
+    const key = `${normalized.title}__${normalized.source_url}`
+    if (added.has(key)) continue
+    added.add(key)
+    target.push(normalized)
+  }
+}
+
+async function tryExtractHuanengToken(page) {
+  try {
+    const res = await page.evaluate(async () => {
+      let found = null
+      try {
+        const r = await fetch(
+          '/scm-uiaoauth-web/s/business/uiaouth/queryAnnouncementByTitle?kbfJdf1e=',
+          {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ title: '' })
+          }
+        )
+        const url = r?.url || ''
+        const m = url.match(/kbfJdf1e=([^&]+)/)
+        if (m) found = m[1]
+      } catch (_e) {
+        // ignore
+      }
+      if (!found) {
+        const scripts = Array.from(document.scripts || [])
+        for (const s of scripts) {
+          const txt = s.textContent || ''
+          const m = txt.match(/kbfJdf1e["']?\s*[:=]\s*["']([^"']+)["']/)
+          if (m) {
+            found = m[1]
+            break
+          }
+        }
+      }
+      return found
+    })
+    return res || null
+  } catch (_e) {
+    return null
+  }
+}
+
+async function crawlHuanengWithBrowser(site) {
+  const executablePath = resolveChromiumPath()
+  const added = new Set()
+  const items = []
+  const targetTypes = ['103', '107']
+  const seenTypes = new Set()
+  let token = null
+  let browser = null
+
+  try {
+    browser = await chromium.launch({
+      headless: true,
+      executablePath: executablePath || undefined,
+      args: ['--no-sandbox']
+    })
+  } catch (e) {
+    console.error('[华能] 浏览器启动失败：', e.message)
+    return []
+  }
+
+  try {
+    const context = await browser.newContext({
+      viewport: { width: 1280, height: 720 },
+      userAgent:
+        'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36',
+      extraHTTPHeaders: { 'Accept-Language': 'zh-CN,zh;q=0.9' }
+    })
+    const page = await context.newPage()
+
+    page.on('request', req => {
+      const url = req.url()
+      if (!url.includes('queryAnnouncementByTitle')) return
+      try {
+        const parsed = new URL(url)
+        const t = parsed.searchParams.get('kbfJdf1e')
+        if (t && !token) token = t
+      } catch (_e) {
+        // ignore
+      }
+    })
+
+    page.on('response', async res => {
+      const url = res.url()
+      if (!url.includes('queryAnnouncementByTitle')) return
+      try {
+        const req = res.request()
+        const body = req.postData() || ''
+        let reqType = null
+        if (body) {
+          try {
+            const parsed = JSON.parse(body)
+            if (parsed?.type) reqType = String(parsed.type)
+          } catch (_e) {
+            const m = body.match(/type=([^&]+)/)
+            if (m) reqType = decodeURIComponent(m[1])
+          }
+        }
+        const data = await res.json()
+        collectHuanengRows(parseHuanengRows(data), site, added, items)
+        if (reqType) seenTypes.add(reqType)
+        if (!token) {
+          try {
+            const parsed = new URL(url)
+            const t = parsed.searchParams.get('kbfJdf1e')
+            if (t) token = t
+          } catch (_e) {
+            // ignore
+          }
+        }
+      } catch (e) {
+        console.error('[华能] 解析响应失败：', e.message)
+      }
+    })
+
+    const targetUrl = site.list_page_url || site.site_url || DEFAULT_HUANENG_URL
+    try {
+      await page.goto(targetUrl, { waitUntil: 'networkidle', timeout: 30000 })
+    } catch (e) {
+      console.error('[华能] 页面打开失败：', e.message)
+    }
+
+    await page.waitForTimeout(4000)
+    if (!items.length) {
+      await page.waitForTimeout(2000)
+    }
+
+    if (targetTypes.some(t => !seenTypes.has(t))) {
+      const tokenValue = token || (await tryExtractHuanengToken(page))
+      if (tokenValue) {
+        token = tokenValue
+        for (const t of targetTypes) {
+          if (seenTypes.has(t)) continue
+          const apiUrl = `https://ec.chng.com.cn/scm-uiaoauth-web/s/business/uiaouth/queryAnnouncementByTitle?kbfJdf1e=${encodeURIComponent(
+            tokenValue
+          )}`
+          try {
+            const resp = await page.request.post(apiUrl, {
+              data: { type: t },
+              headers: {
+                'Content-Type': 'application/json',
+                Accept: 'application/json, text/plain, */*'
+              },
+              timeout: 20000
+            })
+            const json = await resp.json()
+            collectHuanengRows(parseHuanengRows(json), site, added, items)
+            seenTypes.add(t)
+          } catch (e) {
+            console.error(`[华能] 类型${t}补拉失败：`, e.message)
+          }
+        }
+      }
+    }
+
+    if (items.length) {
+      console.log(`[华能] 浏览器抓取得到 ${items.length} 条数据`)
+    } else {
+      console.warn('[华能] 浏览器抓取未获取到数据')
+    }
+
+    return items
+  } catch (e) {
+    console.error('[华能] 浏览器抓取异常：', e.message)
+    return items
+  } finally {
+    if (browser) {
+      try {
+        await browser.close()
+      } catch (_e) {
+        // ignore
+      }
+    }
+  }
+}
+
 async function crawlHuanengApi(site) {
+  const browserItems = await crawlHuanengWithBrowser(site)
+  if (browserItems.length) return browserItems
+
   const { cookie, token } = loadHuanengCreds()
   if (!cookie || !token) {
     console.warn(
-      'Huaneng crawler skipped: set HUANENG_COOKIE/HUANENG_TOKEN or HUANENG_JSON_PATH'
+      '华能抓取跳过：浏览器模式无数据且未配置 HUANENG_COOKIE/HUANENG_TOKEN 或 HUANENG_JSON_PATH'
     )
     return []
   }
+
+  console.warn('[华能] 启用接口回退方式获取数据')
   const types = ['103', '107']
   const items = []
+  const added = new Set()
   for (const t of types) {
     const url = `https://ec.chng.com.cn/scm-uiaoauth-web/s/business/uiaouth/queryAnnouncementByTitle?kbfJdf1e=${encodeURIComponent(
       token
     )}`
-    console.log('[Huaneng] Fetching type', t, 'token prefix:', token.slice(0, 6))
+    console.log(`[华能] 接口抓取类型 ${t}，token 前缀：${token.slice(0, 6)}`)
     const res = await axios.post(
       url,
       { type: t },
@@ -327,39 +559,9 @@ async function crawlHuanengApi(site) {
         }
       }
     )
-    const data = res.data
-    const rows = Array.isArray(data)
-      ? data
-      : Array.isArray(data?.data)
-        ? data.data
-        : Array.isArray(data?.rows)
-          ? data.rows
-          : Array.isArray(data?.body?.data)
-            ? data.body.data
-            : []
-    console.log('[Huaneng] type', t, 'rows:', rows.length)
-    for (const row of rows) {
-      const title = row.title || row.noticeTitle || row.announcementTitle
-      const link =
-        row.url || row.noticeUrl || row.detailUrl || row.href || row.link
-      const date =
-        row.publishDate ||
-        row.releaseDate ||
-        row.date ||
-        row.release_time ||
-        row.publish_time
-      if (!title || !link) continue
-      items.push({
-        title,
-        source_url: normalizeUrl(
-          link,
-          site.site_url || 'https://ec.chng.com.cn'
-        ),
-        publishDate: toISODate(date),
-        site_id: site.id,
-        site_name: site.site_name
-      })
-    }
+    const rows = parseHuanengRows(res.data)
+    console.log(`[华能] 类型 ${t} 返回 ${rows.length} 条`)
+    collectHuanengRows(rows, site, added, items)
   }
   return items
 }
