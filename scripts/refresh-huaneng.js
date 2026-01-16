@@ -8,7 +8,10 @@ const OUTPUT_PATH =
   '/tmp/huaneng.json'
 
 async function main() {
+  const bundled = chromium.executablePath && chromium.executablePath()
+  const bundledPath = bundled && fs.existsSync(bundled) ? bundled : null
   const candidates = [
+    bundledPath,
     process.env.CHROMIUM_PATH,
     process.env.CHROMIUM_PATH,
     '/usr/bin/chromium-browser',
