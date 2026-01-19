@@ -97,13 +97,8 @@ const sites = [
     site_url: 'https://www.chnenergybidding.com.cn',
     list_page_url:
       'https://www.chnenergybidding.com.cn/bidweb/001/001002/001002003/moreinfo.html',
-    crawler_type: 'static',
-    selector_config: {
-      listSelector: '.right-items .right-item',
-      titleSelector: '.r-block a',
-      linkSelector: '.r-block a',
-      dateSelector: 'span.r'
-    },
+    crawler_type: 'chnenergy_html',
+    selector_config: null,
     status: 1
   },
   {
@@ -111,7 +106,7 @@ const sites = [
     site_name: '华电招采平台',
     site_url: 'https://www.chdtp.com.cn',
     list_page_url: 'https://www.chdtp.com.cn/pages/wzglS/cgxx/caigou.jsp',
-    crawler_type: 'static',
+    crawler_type: 'huadian_html',
     selector_config: null,
     status: 1
   },
@@ -121,8 +116,8 @@ const sites = [
     site_url: 'https://ecp.sgcc.com.cn',
     list_page_url:
       'https://ecp.sgcc.com.cn/ecp2.0//portal/#/list/list-spe/2018032600289606_1_2018032700291334',
-    crawler_type: 'static',
-    selector_config: null,
+    crawler_type: 'sgcc_api',
+    selector_config: { firstPageMenuId: '2018032700291334' },
     status: 1
   }
 ]

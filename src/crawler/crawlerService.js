@@ -10,6 +10,9 @@ const HN_TOKEN = process.env.HUANENG_TOKEN || process.env.HN_TOKEN || ''
 const HN_JSON_PATH =
   process.env.HUANENG_JSON_PATH || process.env.HN_JSON_PATH || '/tmp/huaneng.json'
 const CHINALCO_SITE_GUID = '7eb5f7f1-9041-43ad-8e13-8fcb82ea831a'
+const HUADIAN_COOKIE = process.env.HUADIAN_COOKIE || process.env.HD_COOKIE || ''
+const HUADIAN_COOKIE_PATH =
+  process.env.HUADIAN_COOKIE_PATH || process.env.HD_JSON_PATH || '/tmp/huadian.json'
 const TANG_COOKIE = process.env.TANG_COOKIE || ''
 const TANG_JSON_PATH =
   process.env.TANG_JSON_PATH || process.env.TANG_COOKIE_PATH || '/tmp/tang.json'
@@ -18,6 +21,7 @@ const HN_USER_AGENT =
   'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/143.0.0.0 Safari/537.36'
 const HN_ANNOUNCEMENT_URL = 'https://ec.chng.com.cn/#/announcement'
 let latestHuanengCookie = ''
+let latestHuadianCookie = ''
 
 function resolveChromiumPath() {
   const bundled =
@@ -57,6 +61,20 @@ function loadTangCookie() {
   if (!cookie && TANG_JSON_PATH) {
     try {
       const raw = fs.readFileSync(TANG_JSON_PATH, 'utf8')
+      const parsed = JSON.parse(raw)
+      if (parsed?.cookie) cookie = parsed.cookie
+    } catch (_e) {
+      // ignore
+    }
+  }
+  return cookie
+}
+
+function loadHuadianCookie() {
+  let cookie = HUADIAN_COOKIE || latestHuadianCookie
+  if (!cookie && HUADIAN_COOKIE_PATH) {
+    try {
+      const raw = fs.readFileSync(HUADIAN_COOKIE_PATH, 'utf8')
       const parsed = JSON.parse(raw)
       if (parsed?.cookie) cookie = parsed.cookie
     } catch (_e) {
@@ -156,12 +174,32 @@ async function fetchDetailContent(url) {
   if (!url) return ''
   let cookieHeader = ''
   let referer = null
+  let extraHeaders = {}
   try {
     const parsed = new URL(url)
     if (parsed.hostname.includes('ec.chng.com.cn')) {
       const envCookie = loadHuanengCreds().cookie || ''
       cookieHeader = latestHuanengCookie || envCookie
       referer = 'https://ec.chng.com.cn/'
+    } else if (parsed.hostname.includes('chdtp.com.cn')) {
+      referer = 'https://www.chdtp.com.cn/pages/wzglS/cgxx/caigou.jsp'
+      cookieHeader = loadHuadianCookie() || ''
+      extraHeaders = {
+        Accept:
+          'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7',
+        'Accept-Language': 'zh-CN,zh;q=0.9',
+        'Accept-Encoding': 'gzip, deflate, br, zstd',
+        Connection: 'keep-alive',
+        Host: parsed.host,
+        'Upgrade-Insecure-Requests': '1',
+        'Sec-Fetch-Dest': 'document',
+        'Sec-Fetch-Mode': 'navigate',
+        'Sec-Fetch-Site': 'same-origin',
+        'sec-ch-ua':
+          '"Google Chrome";v="114", "Chromium";v="114", "Not A(Brand";v="24"',
+        'sec-ch-ua-mobile': '?0',
+        'sec-ch-ua-platform': '"Windows"'
+      }
     }
   } catch (_e) {
     // ignore parse error
@@ -173,7 +211,8 @@ async function fetchDetailContent(url) {
         'User-Agent':
           'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
         ...(cookieHeader ? { Cookie: cookieHeader } : {}),
-        ...(referer ? { Referer: referer } : {})
+        ...(referer ? { Referer: referer } : {}),
+        ...extraHeaders
       }
     })
     const $ = cheerio.load(res.data || '')
@@ -191,7 +230,11 @@ async function fetchDetailContent(url) {
     }
     return $('body').text().trim().slice(0, 4000)
   } catch (e) {
-    console.error('Fetch detail failed', e.message)
+    if (e?.response?.status === 412) {
+      console.warn(`Fetch detail 412: ${url}`)
+    } else {
+      console.error('Fetch detail failed', e.message)
+    }
     return ''
   }
 }
@@ -236,6 +279,349 @@ async function crawlStaticSite(site) {
   return items
 }
 
+function parseHuadianHtml(html, site) {
+  const $ = cheerio.load(html || '')
+  const added = new Set()
+  const items = []
+  $('a').each((_idx, el) => {
+    const href = $(el).attr('href') || ''
+    const match = href.match(/toGetContent\(['"]([^'"]+)['"]\)/)
+    if (!match) return
+    const path = match[1]
+    const title = $(el).text().trim()
+    if (!title || !path) return
+    const tr = $(el).closest('tr')
+    const dateText = tr
+      .find('span')
+      .last()
+      .text()
+      .replace(/\[|\]/g, '')
+      .trim()
+    const link = normalizeUrl(
+      `/staticPage/${path}`,
+      site.site_url || site.list_page_url
+    )
+    const key = `${title}__${link}`
+    if (added.has(key)) return
+    added.add(key)
+    items.push({
+      title,
+      source_url: link,
+      publishDate: toISODate(dateText),
+      site_id: site.id,
+      site_name: site.site_name
+    })
+  })
+  return items
+}
+
+async function crawlHuadianSite(site) {
+  try {
+    const sendRequest = async url => {
+      let host = null
+      try {
+        host = new URL(url).host
+      } catch (_e) {
+        host = 'www.chdtp.com.cn'
+      }
+      const cookie = loadHuadianCookie()
+      return await axios.get(url, {
+        timeout: 20000,
+        headers: {
+          Accept:
+            'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7',
+          'Accept-Language': 'zh-CN,zh;q=0.9',
+          'Accept-Encoding': 'gzip, deflate, br, zstd',
+          Connection: 'keep-alive',
+          Host: host,
+          'User-Agent':
+            'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36',
+          Referer: site.list_page_url || site.site_url || 'https://www.chdtp.com.cn/',
+          'Sec-Fetch-Dest': 'iframe',
+          'Sec-Fetch-Mode': 'navigate',
+          'Sec-Fetch-Site': 'same-origin',
+          'Upgrade-Insecure-Requests': '1',
+          'sec-ch-ua':
+            '"Google Chrome";v="114", "Chromium";v="114", "Not A(Brand";v="24"',
+          'sec-ch-ua-mobile': '?0',
+          'sec-ch-ua-platform': '"Windows"',
+          ...(cookie ? { Cookie: cookie } : {})
+        }
+      })
+    }
+
+    let res = null
+    try {
+      res = await sendRequest(site.list_page_url)
+    } catch (_e) {
+      const fallback =
+        (site.site_url || 'https://www.chdtp.com.cn').replace(/\/$/, '') +
+        '/webs/queryWebZbgg.action?zbggType=1'
+      try {
+        res = await sendRequest(fallback)
+      } catch (__e) {
+        res = null
+      }
+    }
+    if (!res || res.status === 412) {
+      console.warn('华电页面返回 412，尝试浏览器抓取绕过校验')
+      const browserItems = await crawlHuadianWithBrowser(site)
+      if (browserItems.length) return browserItems
+    }
+
+    return parseHuadianHtml(res.data, site)
+  } catch (e) {
+    console.error('华电页面抓取失败', e.message)
+    const browserItems = await crawlHuadianWithBrowser(site)
+    if (browserItems.length) return browserItems
+    return []
+  }
+}
+
+async function crawlHuadianWithBrowser(site) {
+  const executablePath = resolveChromiumPath()
+  let browser = null
+  let page = null
+  const added = new Set()
+  const results = []
+  const cookie = loadHuadianCookie()
+  const pushItems = list => {
+    for (const item of list || []) {
+      const key = `${item.title}__${item.source_url}`
+      if (added.has(key)) continue
+      added.add(key)
+      results.push(item)
+    }
+  }
+  try {
+    browser = await chromium.launch({
+      headless: true,
+      executablePath: executablePath || undefined,
+      args: ['--no-sandbox', '--disable-dev-shm-usage']
+    })
+    const context = await browser.newContext({
+      viewport: { width: 1280, height: 720 },
+      userAgent:
+        'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/143.0.0.0 Safari/537.36',
+      extraHTTPHeaders: {
+        'Accept-Language': 'zh-CN,zh;q=0.9'
+      },
+      ...(cookie
+        ? {
+            storageState: {
+              cookies: [
+                ...cookie
+                  .split(';')
+                  .map(c => c.trim())
+                  .filter(Boolean)
+                  .map(kv => {
+                    const [name, ...rest] = kv.split('=')
+                    return {
+                      name,
+                      value: rest.join('='),
+                      domain: '.chdtp.com.cn',
+                      path: '/',
+                      httpOnly: false,
+                      secure: true
+                    }
+                  })
+              ]
+            }
+          }
+        : {})
+    })
+    page = await context.newPage()
+    page.on('response', async res => {
+      const url = res.url()
+      if (!url.includes('chdtp.com.cn')) return
+      if (
+        !/queryWebZbgg\.action|caigou\.jsp|cgxx/.test(url) &&
+        res.request().resourceType() !== 'document'
+      )
+        return
+      try {
+        const body = await res.text()
+        const items = parseHuadianHtml(body, site)
+        pushItems(items)
+      } catch (_e) {
+        // ignore parse error
+      }
+    })
+    const targetUrl =
+      site.list_page_url ||
+      site.site_url ||
+      'https://www.chdtp.com.cn/pages/wzglS/cgxx/caigou.jsp'
+    await page.goto(targetUrl, { waitUntil: 'networkidle', timeout: 30000 })
+    await page.waitForTimeout(3000)
+    try {
+      const cookieStr = (
+        await context.cookies('https://www.chdtp.com.cn')
+      )
+        .map(c => `${c.name}=${c.value}`)
+        .join('; ')
+      if (cookieStr) latestHuadianCookie = cookieStr
+    } catch (_e) {
+      // ignore
+    }
+    if (!results.length) {
+      const html = await page.content()
+      pushItems(parseHuadianHtml(html, site))
+    }
+    if (results.length) {
+      console.log(`[华电] 浏览器抓取到 ${results.length} 条`)
+    } else {
+      console.warn('[华电] 浏览器抓取未获取到数据')
+    }
+    return results
+  } catch (e) {
+    console.error('[华电] 浏览器抓取失败：', e.message)
+    return []
+  } finally {
+    if (browser) {
+      try {
+        await browser.close()
+      } catch (_e) {
+        // ignore
+      }
+    }
+  }
+}
+
+async function crawlChnenergySite(site) {
+  try {
+    const res = await axios.get(site.list_page_url, {
+      timeout: 20000,
+      headers: {
+        'User-Agent':
+          'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+      }
+    })
+    const $ = cheerio.load(res.data || '')
+    const added = new Set()
+    const items = []
+    $('a.infolink').each((_idx, el) => {
+      const a = $(el)
+      const title = a.text().trim()
+      const link = a.attr('href')
+      if (!title || !link) return
+      const li = a.closest('li')
+      const dateText = li.find('span.r').first().text().trim()
+      const source = normalizeUrl(
+        link,
+        site.site_url || site.list_page_url
+      )
+      const key = `${title}__${source}`
+      if (added.has(key)) return
+      added.add(key)
+      items.push({
+        title,
+        source_url: source,
+        publishDate: toISODate(dateText),
+        site_id: site.id,
+        site_name: site.site_name
+      })
+    })
+    return items
+  } catch (e) {
+    console.error('国家能源招标网抓取失败', e.message)
+    return []
+  }
+}
+
+function buildSgccDetailUrl(row, site) {
+  const docId = row.firstPageDocId || row.noticeId || row.id
+  if (!docId) return ''
+  const noticeType = row.noticeType || ''
+  const cfg =
+    typeof site.selector_config === 'string'
+      ? (() => {
+          try {
+            return JSON.parse(site.selector_config)
+          } catch (_e) {
+            return null
+          }
+        })()
+      : site.selector_config
+  const menuId =
+    row.firstPageMenuId || (cfg && cfg.firstPageMenuId) || ''
+  const params = [docId, noticeType, menuId].filter(Boolean).join('_')
+  const origin = site.site_url || 'https://ecp.sgcc.com.cn'
+  const portalBase =
+    (site.list_page_url && site.list_page_url.split('#')[0]) ||
+    `${origin.replace(/\/$/, '')}/ecp2.0//portal/`
+  return `${portalBase}#/content/${params}`
+}
+
+async function crawlSgccApi(site) {
+  const cfg =
+    typeof site.selector_config === 'string'
+      ? (() => {
+          try {
+            return JSON.parse(site.selector_config)
+          } catch (_e) {
+            return null
+          }
+        })()
+      : site.selector_config
+  const payload = {
+    index: 1,
+    size: 20,
+    firstPageMenuId: (cfg && cfg.firstPageMenuId) || '2018032700291334',
+    purOrgStatus: '',
+    purOrgCode: '',
+    purType: '',
+    noticeType: '',
+    orgId: '',
+    key: '',
+    orgName: ''
+  }
+  try {
+    const res = await axios.post(
+      'https://ecp.sgcc.com.cn/ecp2.0/ecpwcmcore//index/noteList',
+      payload,
+      {
+        timeout: 20000,
+        headers: {
+          'Content-Type': 'application/json',
+          'User-Agent':
+            'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+          Origin: site.site_url || 'https://ecp.sgcc.com.cn',
+          Referer:
+            site.list_page_url ||
+            site.site_url ||
+            'https://ecp.sgcc.com.cn/ecp2.0//portal/',
+          Accept: 'application/json, text/plain, */*'
+        }
+      }
+    )
+    const data = res.data
+    const list = Array.isArray(data?.resultValue?.noteList)
+      ? data.resultValue.noteList
+      : Array.isArray(data?.noteList)
+        ? data.noteList
+        : []
+    return list
+      .map(row => {
+        const title = row.title || row.noticeTitle || ''
+        const source_url = buildSgccDetailUrl(row, site)
+        if (!title || !source_url) return null
+        return {
+          title,
+          source_url,
+          publishDate: toISODate(
+            row.noticePublishTime || row.publish_time || row.topBeginTime
+          ),
+          site_id: site.id,
+          site_name: site.site_name
+        }
+      })
+      .filter(Boolean)
+  } catch (e) {
+    console.error('国家电网接口抓取失败', e.message)
+    return []
+  }
+}
+
 async function crawlChinalcoApi(site) {
   const all = []
   for (let pageIndex = 0; pageIndex < 3; pageIndex++) {
@@ -264,14 +650,23 @@ async function crawlChinalcoApi(site) {
         }
       })
       const data = res.data
-      const items = Array.isArray(data?.data?.rows) ? data.data.rows : []
+      const items = Array.isArray(data?.data?.rows)
+        ? data.data.rows
+        : Array.isArray(data?.custom?.infodata)
+          ? data.custom.infodata
+          : Array.isArray(data?.data?.data)
+            ? data.data.data
+            : []
       if (!items.length) break
       all.push(
         ...items.map(row => ({
           title: row.title || row.infoname || '',
-          source_url: row.url || row.infourl || '',
+          source_url: normalizeUrl(
+            row.url || row.infourl || '',
+            site.site_url || site.list_page_url
+          ),
           publishDate: toISODate(
-            row.infodate || row.publish_date || row.releasetime
+            row.infodate || row.publish_date || row.releasetime || row.startdate
           ),
           site_id: site.id,
           site_name: site.site_name
@@ -302,58 +697,209 @@ function buildTangDetailUrl(row) {
   return `${base}/notice/moreController/moreall?id=${id}`
 }
 
-async function crawlTangApi(site) {
-  const cookie = loadTangCookie()
-  if (!cookie) {
-    console.warn('Tang crawler skipped: set TANG_COOKIE or TANG_JSON_PATH')
+function parseTangList(list, site) {
+  return (list || [])
+    .map(row => ({
+      title: row.message_title || row.title || '',
+      source_url: buildTangDetailUrl(row),
+      publishDate:
+        toISODate(
+          row.publish_time || row.deadline || row.releasetime || row.publish_date
+        ) || null,
+      site_id: site.id,
+      site_name: site.site_name
+    }))
+    .filter(item => item.title && item.source_url)
+}
+
+async function crawlTangWithBrowser(site) {
+  const executablePath = resolveChromiumPath()
+  let browser = null
+  let page = null
+  const added = new Set()
+  const items = []
+  const collect = list => {
+    for (const n of parseTangList(list, site)) {
+      const key = `${n.title}__${n.source_url}`
+      if (added.has(key)) continue
+      added.add(key)
+      items.push(n)
+    }
+  }
+  try {
+    browser = await chromium.launch({
+      headless: true,
+      executablePath: executablePath || undefined,
+      args: ['--no-sandbox', '--disable-dev-shm-usage']
+    })
+  } catch (e) {
+    console.error('[成达通] 浏览器启动失败：', e.message)
     return []
   }
+
+  try {
+    const context = await browser.newContext({
+      viewport: { width: 1280, height: 720 },
+      userAgent:
+        'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/143.0.0.0 Safari/537.36',
+      extraHTTPHeaders: { 'Accept-Language': 'zh-CN,zh;q=0.9' }
+    })
+    page = await context.newPage()
+    page.on('response', async res => {
+      const url = res.url()
+      if (!url.includes('/notice/moreController/getList')) return
+      try {
+        const data = await res.json()
+        const list = Array.isArray(data?.data)
+          ? data.data
+          : Array.isArray(data?.list)
+            ? data.list
+            : Array.isArray(data?.data?.data)
+              ? data.data.data
+              : Array.isArray(data?.data?.list)
+                ? data.data.list
+                : []
+        collect(list)
+      } catch (_e) {
+        // ignore parse error
+      }
+    })
+
+    const home = site.site_url || 'https://tang.cdt-ec.com'
+    const targetUrl =
+      site.list_page_url ||
+      `${home.replace(/\/$/, '')}/notice/moreController/toMore?globleType=0`
+
+    try {
+      await page.goto(home, { waitUntil: 'networkidle', timeout: 30000 })
+      await page.waitForTimeout(2000)
+    } catch (_e) {
+      // ignore home load errors
+    }
+
+    await page.goto(targetUrl, { waitUntil: 'networkidle', timeout: 30000 })
+    await page.waitForTimeout(4000)
+
+    if (!items.length) {
+      try {
+        const data = await page.evaluate(async () => {
+          const body = new URLSearchParams({
+            page: '1',
+            limit: '10',
+            messagetype: '0',
+            startDate: '',
+            endDate: ''
+          }).toString()
+          const res = await fetch(
+            'https://tang.cdt-ec.com/notice/moreController/getList',
+            {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8'
+              },
+              credentials: 'include',
+              body
+            }
+          )
+          return await res.json()
+        })
+        const list = Array.isArray(data?.data)
+          ? data.data
+          : Array.isArray(data?.list)
+            ? data.list
+            : Array.isArray(data?.data?.data)
+              ? data.data.data
+              : Array.isArray(data?.data?.list)
+                ? data.data.list
+                : []
+        collect(list)
+      } catch (_e) {
+        // ignore
+      }
+    }
+    if (items.length) {
+      console.log(`[成达通] 浏览器抓取到 ${items.length} 条`)
+    } else {
+      console.warn('[成达通] 浏览器抓取未获取到数据')
+    }
+    return items
+  } catch (e) {
+    console.error('[成达通] 浏览器抓取失败：', e.message)
+    return []
+  } finally {
+    if (browser) {
+      try {
+        await browser.close()
+      } catch (_e) {
+        // ignore
+      }
+    }
+  }
+}
+
+async function crawlTangApi(site) {
   const url = 'https://tang.cdt-ec.com/notice/moreController/getList'
   const all = []
-  for (let pageIndex = 0; pageIndex < 3; pageIndex++) {
-    const body = new URLSearchParams({
-      pageIndex: String(pageIndex),
-      pageSize: '20',
-      globleType: '0'
-    }).toString()
+  const browserItems = await crawlTangWithBrowser(site)
+  if (browserItems.length) return browserItems
+
+  for (let pageIndex = 1; pageIndex <= 3; pageIndex++) {
+    const buildBody = fallback =>
+      new URLSearchParams(
+        fallback
+          ? {
+              pageIndex: String(pageIndex - 1),
+              pageSize: '20',
+              globleType: '0'
+            }
+          : {
+              page: String(pageIndex),
+              limit: '10',
+              messagetype: '0',
+              startDate: '',
+              endDate: ''
+            }
+      ).toString()
+    const bodies = [buildBody(false), buildBody(true)]
     try {
-      const res = await axios.post(url, body, {
-        timeout: 20000,
-        headers: {
-          Cookie: cookie,
-          'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
-          'User-Agent':
-            'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-          Referer:
-            site.list_page_url || site.site_url || 'https://tang.cdt-ec.com',
-          Origin: 'https://tang.cdt-ec.com',
-          'X-Requested-With': 'XMLHttpRequest',
-          Accept: 'application/json, text/javascript, */*; q=0.01'
-        }
-      })
-      const data = res.data
-      const list =
-        Array.isArray(data?.data?.data) || Array.isArray(data?.data?.list)
-          ? data.data.data || data.data.list
-          : Array.isArray(data?.data)
-            ? data.data
-            : Array.isArray(data?.list)
-              ? data.list
-              : []
-      if (!list.length) break
-      all.push(
-        ...list
-          .map(row => ({
-            title: row.message_title || row.title || '',
-            source_url: buildTangDetailUrl(row),
-            publishDate:
-              toISODate(row.deadline || row.releasetime || row.publish_date) ||
-              null,
-            site_id: site.id,
-            site_name: site.site_name
-          }))
-          .filter(item => item.title && item.source_url)
-      )
+      let list = []
+      let lastData = null
+      for (const body of bodies) {
+        const res = await axios.post(url, body, {
+          timeout: 20000,
+          headers: {
+            'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
+            'User-Agent':
+              'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+            Referer:
+              site.list_page_url || site.site_url || 'https://tang.cdt-ec.com',
+            Origin: 'https://tang.cdt-ec.com',
+            'X-Requested-With': 'XMLHttpRequest',
+            Accept: 'application/json, text/javascript, */*; q=0.01'
+          }
+        })
+        const data = res.data
+        lastData = data
+        list = Array.isArray(data?.data)
+          ? data.data
+          : Array.isArray(data?.list)
+            ? data.list
+            : Array.isArray(data?.data?.data)
+              ? data.data.data
+              : Array.isArray(data?.data?.list)
+                ? data.data.list
+                : []
+        if (list.length) break
+      }
+
+      if (!list.length) {
+        console.warn(
+          `Tang 返回空列表，响应片段: ${JSON.stringify(lastData || {}).slice(0, 200)}`
+        )
+        break
+      }
+
+      all.push(...parseTangList(list, site))
     } catch (e) {
       console.error('Tang page fetch failed', e.message)
       break
@@ -739,6 +1285,12 @@ async function crawlSite(site) {
     let notices = []
     if (site.crawler_type === 'huaneng_api') {
       notices = await crawlHuanengApi(site)
+    } else if (site.crawler_type === 'huadian_html') {
+      notices = await crawlHuadianSite(site)
+    } else if (site.crawler_type === 'chnenergy_html') {
+      notices = await crawlChnenergySite(site)
+    } else if (site.crawler_type === 'sgcc_api') {
+      notices = await crawlSgccApi(site)
     } else if (site.crawler_type === 'chinalco_api') {
       notices = await crawlChinalcoApi(site)
     } else if (site.crawler_type === 'tang_api') {
@@ -752,6 +1304,13 @@ async function crawlSite(site) {
     console.log(
       `Crawled site ${site.site_name}: got ${notices.length} items (after filters)`
     )
+    if (notices.length) {
+      const preview = notices
+        .slice(0, 5)
+        .map(n => `${n.title} | ${n.publishDate || ''} | ${n.source_url}`)
+      console.log(`示例（前 ${preview.length} 条）：`)
+      for (const line of preview) console.log(line)
+    }
   } catch (e) {
     console.error(`Crawl failed for ${site.site_name}:`, e.message)
   }
