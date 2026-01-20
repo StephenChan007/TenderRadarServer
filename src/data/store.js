@@ -534,6 +534,9 @@ async function addNotice(notice) {
         ]
       )
       const insertedId = result.insertId || null
+      console.log(
+        `[DB] addNotice success site=${notice.site_name || ''} title=${notice.title || ''} id=${insertedId}`
+      )
       return {
         id: insertedId,
         title: notice.title,
@@ -544,6 +547,9 @@ async function addNotice(notice) {
       }
     } catch (e) {
       handleDbError('addNotice', e)
+      console.error(
+        `[DB] addNotice failed site=${notice.site_name || ''} title=${notice.title || ''}: ${e.message}`
+      )
     }
   }
   const id = nextId(notices)

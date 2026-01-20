@@ -1259,13 +1259,26 @@ async function crawlHuanengApi(site) {
 }
 
 async function processNotice(raw, site) {
-  if (!raw?.title || !raw?.source_url) return
+  if (!raw?.title || !raw?.source_url) {
+    console.warn(
+      `[Notice] 数据缺失，跳过 site=${site?.site_name || ''} title=${raw?.title || ''} url=${raw?.source_url || ''}`
+    )
+    return
+  }
   if (await hasNotice(raw.title, raw.source_url)) {
+    console.log(
+      `[Notice] 已存在，跳过 site=${site.site_name || ''} title=${raw.title}`
+    )
     return
   }
   const content = await fetchDetailContent(raw.source_url)
   const matched = await matchKeywords(raw.title, content)
-  if (!matched.length) return
+  if (!matched.length) {
+    console.log(
+      `[Notice] 未匹配关键词，跳过 site=${site.site_name || ''} title=${raw.title}`
+    )
+    return
+  }
   const saved = await addNotice({
     title: raw.title,
     site_name: site.site_name,
@@ -1276,6 +1289,13 @@ async function processNotice(raw, site) {
   })
   if (saved) {
     await notifyMatchedNotice(saved, matched)
+    console.log(
+      `[Notice] 保存并推送 site=${site.site_name || ''} title=${raw.title}`
+    )
+  } else {
+    console.warn(
+      `[Notice] 保存失败 site=${site.site_name || ''} title=${raw.title}`
+    )
   }
 }
 
