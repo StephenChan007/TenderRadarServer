@@ -32,7 +32,6 @@ function resolveChromiumPath() {
   const candidates = [
     bundledPath,
     process.env.CHROMIUM_PATH,
-    process.env.CHROMIUM_PATH,
     '/usr/bin/chromium',
     '/usr/bin/chromium-browser',
     '/usr/lib/chromium/chrome'
@@ -241,11 +240,8 @@ async function fetchDetailContent(url) {
   let extraHeaders = {}
   try {
     const parsed = new URL(url)
-    if (parsed.hostname.includes('ec.chng.com.cn')) {
-      const envCookie = loadHuanengCreds().cookie || ''
-      cookieHeader = latestHuanengCookie || envCookie
-      referer = 'https://ec.chng.com.cn/'
-    } else if (parsed.hostname.includes('chdtp.com.cn')) {
+    // ec.chng.com.cn 已由 SPA_HOSTNAMES 走浏览器路径，此处不再处理
+    if (parsed.hostname.includes('chdtp.com.cn')) {
       referer = 'https://www.chdtp.com.cn/pages/wzglS/cgxx/caigou.jsp'
       cookieHeader = loadHuadianCookie() || ''
       extraHeaders = {
@@ -1252,11 +1248,14 @@ async function crawlHuanengWithBrowser(site) {
 
     return { items, token, cookie: cookieStr }
   } catch (e) {
-    const cookieStr = context
-      ? (await context.cookies('https://ec.chng.com.cn'))
+    let cookieStr = null
+    try {
+      if (context) {
+        cookieStr = (await context.cookies('https://ec.chng.com.cn'))
           .map(c => `${c.name}=${c.value}`)
           .join('; ')
-      : null
+      }
+    } catch (_ce) { /* ignore cookie extraction error */ }
     console.error('[华能] 浏览器抓取异常：', e.message)
     return { items, token: token || null, cookie: cookieStr }
   } finally {

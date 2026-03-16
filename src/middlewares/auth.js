@@ -46,7 +46,6 @@ async function loginHandler(req, res, next) {
     const token = generateToken()
     sessions.set(token, {
       openid,
-      sessionKey: session.session_key,
       createdAt: Date.now()
     })
     res.json({ data: { token, openid } })
