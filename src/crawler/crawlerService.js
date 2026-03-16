@@ -170,8 +170,72 @@ async function matchKeywords(title, content) {
   return matched
 }
 
+// SPA 站点的 noscript 兜底文本特征，用于检测无效内容
+const SPA_NOSCRIPT_PATTERNS = [
+  /doesn['']t work properly without JavaScript/i,
+  /please enable (it|javascript) to continue/i,
+  /you need to enable javascript/i,
+  /this app requires javascript/i,
+  /we['']re sorry but .+ doesn['']t work/i
+]
+
+// 已知的 SPA 站点域名，这些站点用 axios+cheerio 无法获取有效内容
+const SPA_HOSTNAMES = [
+  'ec.chng.com.cn' // 华能 - Vue SPA
+]
+
+function isSpaJunkContent(text) {
+  if (!text || text.length < 10) return true
+  return SPA_NOSCRIPT_PATTERNS.some(re => re.test(text))
+}
+
+async function fetchDetailContentWithBrowser(url) {
+  const executablePath = resolveChromiumPath()
+  let browser = null
+  try {
+    browser = await chromium.launch({
+      headless: true,
+      executablePath: executablePath || undefined,
+      args: ['--no-sandbox', '--disable-dev-shm-usage']
+    })
+    const context = await browser.newContext({
+      viewport: { width: 1280, height: 720 },
+      userAgent:
+        'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/143.0.0.0 Safari/537.36'
+    })
+    const page = await context.newPage()
+    await page.goto(url, { waitUntil: 'networkidle', timeout: 30000 })
+    const selectors = ['.content', '.article-content', '#content', '.article', '.main', 'body']
+    for (const sel of selectors) {
+      const text = await page.evaluate(s => {
+        const el = document.querySelector(s)
+        return el ? el.innerText.trim() : ''
+      }, sel)
+      if (text && text.length > 50 && !isSpaJunkContent(text)) return text
+    }
+    return ''
+  } catch (e) {
+    console.error('Browser fetch detail failed', e.message)
+    return ''
+  } finally {
+    if (browser) await browser.close().catch(() => {})
+  }
+}
+
 async function fetchDetailContent(url) {
   if (!url) return ''
+
+  // 判断是否为已知 SPA 站点，直接用浏览器获取
+  let isSpa = false
+  try {
+    const parsed = new URL(url)
+    isSpa = SPA_HOSTNAMES.some(h => parsed.hostname.includes(h))
+  } catch (_e) {}
+
+  if (isSpa) {
+    return fetchDetailContentWithBrowser(url)
+  }
+
   let cookieHeader = ''
   let referer = null
   let extraHeaders = {}
@@ -226,9 +290,12 @@ async function fetchDetailContent(url) {
     ]
     for (const sel of possibleSelectors) {
       const text = $(sel).text().trim()
-      if (text && text.length > 50) return text
+      if (text && text.length > 50 && !isSpaJunkContent(text)) return text
     }
-    return $('body').text().trim().slice(0, 4000)
+    // 最终兜底也要检查
+    const fallback = $('body').text().trim().slice(0, 4000)
+    if (isSpaJunkContent(fallback)) return ''
+    return fallback
   } catch (e) {
     if (e?.response?.status === 412) {
       console.warn(`Fetch detail 412: ${url}`)
