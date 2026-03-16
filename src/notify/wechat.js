@@ -1,4 +1,9 @@
 const axios = require('axios')
+const https = require('https')
+
+// 微信云托管环境出口流量经代理转发，代理可能使用自签名证书
+// 仅对微信官方 API 调用跳过证书校验
+const wxApiAgent = new https.Agent({ rejectUnauthorized: false })
 
 const APP_ID =
   process.env.WEAPP_APPID ||
@@ -30,7 +35,8 @@ async function doRefreshToken() {
       appid: APP_ID,
       secret: APP_SECRET
     },
-    timeout: 10000
+    timeout: 10000,
+    httpsAgent: wxApiAgent
   })
   const data = res.data || {}
   if (data.errcode) {
@@ -70,7 +76,8 @@ async function code2Session(code) {
       secret: APP_SECRET,
       js_code: code
     },
-    timeout: 10000
+    timeout: 10000,
+    httpsAgent: wxApiAgent
   })
   const data = res.data || {}
   if (data.errcode) {
@@ -91,7 +98,7 @@ async function sendSubscribeMessage({ openid, templateId, page, data }) {
       page: page || 'pages/index/index',
       data
     },
-    { timeout: 10000 }
+    { timeout: 10000, httpsAgent: wxApiAgent }
   )
   const payload = res.data || {}
   if (payload.errcode === 0) return { ok: true }
