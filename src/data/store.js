@@ -8,12 +8,19 @@ const REDIS_URL = process.env.REDIS_URL
 let pool = null
 let redis = null
 
-console.log(`[Config] DB_URL=${DB_URL || 'not set'}`)
-console.log(`[Config] REDIS_URL=${REDIS_URL || 'not set'}`)
+console.log(`[Config] DB_URL=${DB_URL ? 'configured' : 'not set'}`)
+console.log(`[Config] REDIS_URL=${REDIS_URL ? 'configured' : 'not set'}`)
 
 if (DB_URL) {
   try {
-    pool = mysql.createPool(DB_URL)
+    pool = mysql.createPool({
+      uri: DB_URL,
+      connectionLimit: 20,
+      connectTimeout: 10000,
+      enableKeepAlive: true,
+      waitForConnections: true,
+      queueLimit: 50
+    })
     console.log('[DB] MySQL pool created')
   } catch (e) {
     console.error('[DB] Failed to init pool:', e.message)
@@ -30,13 +37,29 @@ if (REDIS_URL) {
   }
 }
 
+let dbErrorCount = 0
+const DB_ERROR_THRESHOLD = 10
+const DB_ERROR_RESET_MS = 60 * 1000
+
 function handleDbError(context, error) {
+  dbErrorCount++
   console.error(
-    `[DB] ${context} failed (falling back to in-memory store):`,
+    `[DB] ${context} failed (error #${dbErrorCount}, falling back to in-memory for this call):`,
     error?.message || error
   )
-  pool = null
+  // 仅在连续大量错误时临时禁用，但不销毁连接池
+  // 连接池自身会处理重连
+  if (dbErrorCount >= DB_ERROR_THRESHOLD) {
+    console.error(`[DB] ${dbErrorCount} consecutive errors, pool may be unhealthy`)
+  }
 }
+
+// 定期重置错误计数器
+const dbErrorResetTimer = setInterval(() => {
+  if (dbErrorCount > 0) {
+    dbErrorCount = 0
+  }
+}, DB_ERROR_RESET_MS)
 
 const notices = [
   {
@@ -441,6 +464,23 @@ async function updateSubscriptionStatus({ enabled, tmplIds }) {
 
 async function getSubscribers() {
   if (redis) {
+    // 优先使用 per-openid key 模式
+    const openids = await redis.smembers('subscription:openids')
+    if (openids && openids.length) {
+      const list = []
+      for (const oid of openids) {
+        const raw = await redis.get(`subscription:user:${oid}`)
+        if (raw) {
+          try { list.push(JSON.parse(raw)) } catch (_e) { /* skip */ }
+        } else {
+          // 清理已过期/删除的 openid 索引
+          await redis.srem('subscription:openids', oid)
+        }
+      }
+      if (list.length) return list
+      // 全部过期则 fall through 到旧格式
+    }
+    // 向后兼容：读取旧格式
     const cached = await redis.get('subscription:users')
     if (cached) {
       try {
@@ -461,22 +501,46 @@ async function saveSubscribers(list) {
 
 async function upsertSubscriber({ openid, tmplIds }) {
   if (!openid) return null
-  const list = await getSubscribers()
-  const existing = list.find(item => item.openid === openid)
   const now = new Date().toISOString()
-  if (existing) {
-    existing.tmplIds = Array.isArray(tmplIds) && tmplIds.length ? tmplIds : existing.tmplIds || []
-    existing.updatedAt = now
-  } else {
-    list.push({
-      openid,
-      tmplIds: Array.isArray(tmplIds) && tmplIds.length ? tmplIds : [],
-      createdAt: now,
-      updatedAt: now
-    })
+  const entry = {
+    openid,
+    tmplIds: Array.isArray(tmplIds) && tmplIds.length ? tmplIds : [],
+    updatedAt: now
   }
-  await saveSubscribers(list)
-  return existing || list[list.length - 1]
+
+  // 使用 per-openid key 避免读-改-写竞态
+  if (redis) {
+    const key = `subscription:user:${openid}`
+    const existing = await redis.get(key)
+    if (existing) {
+      try {
+        const parsed = JSON.parse(existing)
+        entry.createdAt = parsed.createdAt || now
+        if (!entry.tmplIds.length) entry.tmplIds = parsed.tmplIds || []
+      } catch (_e) {
+        entry.createdAt = now
+      }
+    } else {
+      entry.createdAt = now
+    }
+    await redis.set(key, JSON.stringify(entry))
+    // 同时更新总列表索引
+    await redis.sadd('subscription:openids', openid)
+    return entry
+  }
+
+  // 内存回退
+  const list = subscribers
+  const existingIdx = list.findIndex(item => item.openid === openid)
+  if (existingIdx !== -1) {
+    entry.createdAt = list[existingIdx].createdAt || now
+    if (!entry.tmplIds.length) entry.tmplIds = list[existingIdx].tmplIds || []
+    list[existingIdx] = entry
+  } else {
+    entry.createdAt = now
+    list.push(entry)
+  }
+  return entry
 }
 
 async function getUserProfile() {
@@ -534,6 +598,16 @@ async function addNotice(notice) {
         ]
       )
       const insertedId = result.insertId || null
+      // MySQL ON DUPLICATE KEY UPDATE 行为:
+      // affectedRows=1 表示新插入
+      // affectedRows=2 表示匹配到重复键并执行了 UPDATE（即使是 id=id 的空操作）
+      // 仅 affectedRows=1 时才是真正的新记录
+      if (result.affectedRows !== 1) {
+        console.log(
+          `[DB] addNotice duplicate (affectedRows=${result.affectedRows}), skipping site=${notice.site_name || ''} title=${notice.title || ''}`
+        )
+        return null
+      }
       console.log(
         `[DB] addNotice success site=${notice.site_name || ''} title=${notice.title || ''} id=${insertedId}`
       )
@@ -576,6 +650,16 @@ function parseSelectorConfig(cfg) {
   }
 }
 
+async function cleanup() {
+  clearInterval(dbErrorResetTimer)
+  if (pool) {
+    try { await pool.end() } catch (_e) { /* ignore */ }
+  }
+  if (redis) {
+    try { redis.quit() } catch (_e) { /* ignore */ }
+  }
+}
+
 module.exports = {
   getNotices,
   addNotice,
@@ -593,5 +677,6 @@ module.exports = {
   upsertSubscriber,
   getUserProfile,
   updateUserProfile,
-  paginate
+  paginate,
+  cleanup
 }

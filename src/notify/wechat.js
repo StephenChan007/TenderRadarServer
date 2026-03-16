@@ -16,11 +16,10 @@ let cachedToken = {
   expiresAt: 0
 }
 
-async function getAccessToken() {
-  const now = Date.now()
-  if (cachedToken.accessToken && cachedToken.expiresAt - now > 60 * 1000) {
-    return cachedToken.accessToken
-  }
+// 用 promise 单例防止并发刷新
+let refreshPromise = null
+
+async function doRefreshToken() {
   if (!APP_ID || !APP_SECRET) {
     throw new Error('缺少小程序 AppID 或 Secret')
   }
@@ -39,9 +38,23 @@ async function getAccessToken() {
   }
   cachedToken = {
     accessToken: data.access_token,
-    expiresAt: now + (data.expires_in || 7000) * 1000
+    expiresAt: Date.now() + (data.expires_in || 7000) * 1000
   }
   return cachedToken.accessToken
+}
+
+async function getAccessToken() {
+  const now = Date.now()
+  if (cachedToken.accessToken && cachedToken.expiresAt - now > 60 * 1000) {
+    return cachedToken.accessToken
+  }
+  // 并发安全：只有第一个调用者真正刷新，其余等待同一个 promise
+  if (!refreshPromise) {
+    refreshPromise = doRefreshToken().finally(() => {
+      refreshPromise = null
+    })
+  }
+  return refreshPromise
 }
 
 async function code2Session(code) {

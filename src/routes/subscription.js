@@ -4,7 +4,6 @@ const {
   updateSubscriptionStatus,
   upsertSubscriber
 } = require('../data/store')
-const { code2Session } = require('../notify/wechat')
 
 const router = Router()
 
@@ -29,14 +28,11 @@ router.post('/status', async (req, res, next) => {
 
 router.post('/consent', async (req, res, next) => {
   try {
-    const { code, tmplIds } = req.body || {}
-    if (!code) {
-      return res.status(400).json({ message: '缺少登录code' })
-    }
-    const session = await code2Session(code)
-    const openid = session?.openid
+    const { tmplIds } = req.body || {}
+    // openid 已由 auth 中间件从 session 中注入，无需再次调用 code2Session
+    const openid = req.openid
     if (!openid) {
-      return res.status(400).json({ message: '未获取到openid' })
+      return res.status(401).json({ message: '未登录，无法获取用户标识' })
     }
     const saved = await upsertSubscriber({ openid, tmplIds })
     res.json({ data: saved })

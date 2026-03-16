@@ -364,9 +364,11 @@ async function crawlHuadianSite(site) {
       }
     }
     if (!res || res.status === 412) {
-      console.warn('华电页面返回 412，尝试浏览器抓取绕过校验')
+      console.warn('华电页面返回 412 或无响应，尝试浏览器抓取绕过校验')
       const browserItems = await crawlHuadianWithBrowser(site)
       if (browserItems.length) return browserItems
+      // res 为 null 时直接返回空数组，避免空指针
+      if (!res) return []
     }
 
     return parseHuadianHtml(res.data, site)
